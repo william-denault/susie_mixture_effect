@@ -35,7 +35,7 @@ for (j in 1:p) {
 # ─────────────────────────────────────────────────────────────────────────────
 set.seed(1)
 
-causal_snps <- c(12 , 92 ,128, 165)
+causal_snps <- c(12 , 92 ,128, 165) 
 true_models <- c("additive", "dominant", "recessive", "mixture")
 
 cat("Causal SNPs:", causal_snps, "\n")
@@ -49,7 +49,7 @@ y <- y + 2.0 * scale(AD[,  causal_snps[1]])   # purely additive
 y <- y + 2.0 * scale(DOM[, causal_snps[2]])   # purely dominant
 y <- y + 2.0 * scale(REC[, causal_snps[3]])   # purely recessive
 
-
+ 
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  FINE-MAP SNP that stems from different models using additive effect
@@ -81,7 +81,7 @@ causal_snps
 # ─────────────────────────────────────────────────────────────────────────────
 set.seed(1)
 
-
+ 
 true_models <- c("additive", "dominant", "recessive", "mixture")
 
 cat("Causal SNPs:", causal_snps, "\n")
