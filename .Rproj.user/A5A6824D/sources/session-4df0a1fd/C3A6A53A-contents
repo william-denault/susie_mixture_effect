@@ -1,0 +1,77 @@
+library(susieR)
+X <- N3finemapping$X
+
+AD <- 0 * X
+Dom <- 0 * X
+set.seed(1)
+# Pre-allocate a matrix to store the counts (3 rows: 0, 1, 2)
+counts_matrix <- matrix(0, nrow = 3, ncol = ncol(X))
+rownames(counts_matrix) <- c("Count_0", "Count_1", "Count_2")
+
+for (k in 1:ncol(X)) {
+  # 1. Determine number of clusters (max 3)
+  nval <- min(length(unique(X[, k])), 3)
+
+  # FIX: Use k instead of i inside the loop
+  km <- kmeans(X[, k], centers = nval)
+
+  # 2. Rank clusters by frequency (Descending)
+  counts_temp <- table(km$cluster)
+  freq_rank <- order(counts_temp, decreasing = TRUE)
+
+  # 3. Map to 0, 1, 2 based on frequency
+  map <- numeric(nval)
+  map[freq_rank] <- 0:(nval - 1)
+
+  X_recoded_col <- map[km$cluster]
+
+  # 4. Store the recoded values in AD and Dom
+  AD[, k] <- X_recoded_col
+  X_recoded_dom <- X_recoded_col
+  if (nval > 2) {
+    X_recoded_dom[which(X_recoded_col == 2)] <- 1
+    col_counts <- table( (X_recoded_col ))
+    counts_matrix[, k] <- as.numeric(col_counts)
+  }else{
+    col_counts <- table( (X_recoded_col ))
+    counts_matrix[1:2, k] <- as.numeric(col_counts)
+  }
+  Dom[, k] <- X_recoded_dom
+
+  # 5. Store the counts in our result matrix
+  # This ensures even if a 1 or 2 is missing, it gets recorded as 0
+
+}
+
+#lets pick a colum with nice distribution of 0 1 and 2
+
+
+table(AD[, 393])
+#this looks good
+
+
+
+#lets now assign  at random each individual to a given model
+#0 additve 1 dominant
+
+is_dom= sample( size= nrow(X), c(0,1), replace=TRUE)
+beta_effect=1
+y= 0*X[,1]
+for ( i in 1:length(y)){
+  if( is_dom[i]==1){
+    y[i]= 4*beta_effect*Dom[i,393]+ rnorm(n=1)
+
+  }else{
+    y[i]= -1*beta_effect*AD[i,393]+ rnorm(n=1)
+
+  }
+
+
+}
+
+table(AD[ ,393], is_dom)
+
+plot(AD[,393],y)
+
+res= susie(X= cbind(AD,Dom),y)
+res$sets

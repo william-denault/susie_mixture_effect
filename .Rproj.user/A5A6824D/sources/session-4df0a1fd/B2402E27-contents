@@ -1,0 +1,372 @@
+# ── SS-SER log BF (unchanged) ──────────────────────────────────────────────
+compute_log_ssbf_single <- function(x, y, s0 = 1) {
+  x <- x - mean(x); y <- y - mean(y)
+  if (var(x) == 0) return(-Inf)
+  n    <- length(x)
+  xtx  <- sum(x^2); xty <- sum(x * y); yty <- sum(y^2)
+  r0   <- s0 / (s0 + 1/xtx)
+  sxy2 <- xty^2 / (xtx * yty)
+  (log(1 - r0) - n * log(1 - r0 * sxy2)) / 2
+}
+
+# ── null log marginal likelihood for a given y under IG(0,0) prior ─────────
+log_ml_null <- function(y) {
+  y  <- y - mean(y)
+  n  <- length(y)
+  yty <- sum(y^2)
+  lgamma(n/2) - (n/2) * log(yty/2) - (n/2) * log(2*pi) + log(2)
+}
+
+# ── EM for mixture model (same as before) ──────────────────────────────────
+run_mixture_em <- function(ad_j, dom_j, y, max_iter = 200, tol = 1e-8) {
+  y     <- y     - mean(y)
+  ad_j  <- ad_j  - mean(ad_j)
+  dom_j <- dom_j - mean(dom_j)
+  if (var(ad_j) == 0 & var(dom_j) == 0) return(NULL)
+
+  q      <- rep(0.5, length(y))
+  pi_mix <- 0.5
+  beta   <- coef(lm(y ~ dom_j))[2]
+  sigma2 <- var(y)
+  ll_old <- -Inf
+
+  for (iter in 1:max_iter) {
+    log_p1 <- log(pi_mix)       - (y - beta * dom_j)^2 / (2 * sigma2)
+    log_p0 <- log(1 - pi_mix)   - (y - beta * ad_j)^2  / (2 * sigma2)
+    lse    <- pmax(log_p1, log_p0) +
+      log(exp(log_p1 - pmax(log_p1, log_p0)) +
+            exp(log_p0 - pmax(log_p1, log_p0)))
+    q      <- exp(log_p1 - lse)
+
+    pi_mix  <- pmax(pmin(mean(q), 1 - 1e-8), 1e-8)
+    x_eff   <- q * dom_j + (1 - q) * ad_j
+    x2_eff  <- x_eff^2 + q * (1 - q) * (dom_j - ad_j)^2
+    beta    <- sum(x_eff * y) / sum(x2_eff)
+    resid   <- y - beta * x_eff
+    sigma2  <- max(mean(resid^2 + beta^2 * q*(1-q)*(dom_j - ad_j)^2), 1e-8)
+
+    ll <- sum(lse)
+    if (abs(ll - ll_old) < tol) break
+    ll_old <- ll
+  }
+  list(q = q, pi_mix = pi_mix, beta = beta)
+}
+
+# ── PROPER mixture log BF ───────────────────────────────────────────────────
+compute_log_bf_mixture_proper <- function(ad_j, dom_j, y, s0 = 1) {
+  em <- run_mixture_em(ad_j, dom_j, y)
+  if (is.null(em)) return(-Inf)
+
+  n     <- length(y)
+  z_hat <- as.integer(em$q > 0.5)
+  n1    <- sum(z_hat);     n0 <- n - n1
+
+  # edge case: one group is empty
+  if (n1 < 5 | n0 < 5) return(-Inf)
+
+  idx0  <- which(z_hat == 0);  idx1 <- which(z_hat == 1)
+  y0    <- y[idx0];             y1   <- y[idx1]
+  x0    <- ad_j[idx0];          x1   <- dom_j[idx1]
+
+  # within-group SS-SER log BFs
+  log_bf0 <- compute_log_ssbf_single(x0, y0, s0)
+  log_bf1 <- compute_log_ssbf_single(x1, y1, s0)
+
+  # Beta-Binomial penalty for pi
+  log_beta_bin <- lgamma(n1 + 1) + lgamma(n0 + 1) - lgamma(n + 2)
+
+  # data-splitting null correction
+  delta_null <- log_ml_null(y) - log_ml_null(y0) - log_ml_null(y1)
+
+  log_bf0 + log_bf1 + log_beta_bin + delta_null
+}
+
+# ── model assessment (updated) ──────────────────────────────────────────────
+assess_genetic_model <- function(snp_idx, AD, DOM, REC, y, s0 = 1) {
+  log_bfs <- c(
+    Additive  = compute_log_ssbf_single(AD[, snp_idx],  y, s0),
+    Dominant  = compute_log_ssbf_single(DOM[, snp_idx], y, s0),
+    Recessive = compute_log_ssbf_single(REC[, snp_idx], y, s0),
+    Mixture   = compute_log_bf_mixture_proper(AD[, snp_idx], DOM[, snp_idx], y, s0)
+  )
+
+  log_bfs_stable <- log_bfs - max(log_bfs[is.finite(log_bfs)])
+  post_probs     <- exp(log_bfs_stable) / sum(exp(log_bfs_stable))
+
+  data.frame(
+    SNP       = snp_idx,
+    Model     = names(log_bfs),
+    log_BF    = log_bfs,
+    Post_Prob = post_probs,
+    row.names = NULL
+  )
+}
+
+
+
+library(susieR)
+library(ggplot2)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. DATA SETUP
+# ─────────────────────────────────────────────────────────────────────────────
+data(N3finemapping)
+X_raw <- N3finemapping$X
+
+recode_snp <- function(x) {
+  counts      <- table(x)
+  sorted_vals <- names(sort(counts, decreasing = TRUE))
+  ad          <- match(x, sorted_vals) - 1
+  dom         <- as.integer(ad >= 1)
+  rec         <- as.integer(ad == 2)
+  list(ad = ad, dom = dom, rec = rec)
+}
+
+n <- nrow(X_raw); p <- ncol(X_raw)
+AD  <- matrix(0, n, p)
+DOM <- matrix(0, n, p)
+REC <- matrix(0, n, p)
+
+for (j in 1:p) {
+  rc <- recode_snp(X_raw[, j])
+  AD[, j]  <- rc$ad
+  DOM[, j] <- rc$dom
+  REC[, j] <- rc$rec
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. SIMULATE PHENOTYPE
+#    SNP 100: purely additive
+#    SNP 200: purely dominant
+#    SNP 300: purely recessive
+#    SNP 400: mixture (50% additive, 50% dominant, opposite signs)
+# ─────────────────────────────────────────────────────────────────────────────
+set.seed(42)
+
+causal_snps <- c(100, 200, 300, 400)
+true_models <- c("additive", "dominant", "recessive", "mixture")
+
+y <- rnorm(n)
+y <- y + 2.0 * scale(AD[, 100])
+y <- y + 2.0 * scale(DOM[, 200])
+y <- y + 2.0 * scale(REC[, 300])
+
+is_dom_400 <- sample(c(0, 1), n, replace = TRUE)
+y <- y + is_dom_400 * 3.0 * DOM[, 400] + (1 - is_dom_400) * (-2.0) * AD[, 400]
+y <- as.numeric(scale(y))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. FINE-MAP WITH SUSIE ON STACKED MATRIX
+# ─────────────────────────────────────────────────────────────────────────────
+X_stacked <- cbind(AD, DOM, REC)
+colnames(X_stacked) <- c(paste0("AD_", 1:p),
+                         paste0("DOM_", 1:p),
+                         paste0("REC_", 1:p))
+
+res_susie <- susie(X_stacked, y, L = 10, verbose = FALSE)
+cat("CSs found:\n"); print(res_susie$sets)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. MODEL ASSESSMENT FUNCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── SS-SER log BF ─────────────────────────────────────────────────────────
+compute_log_ssbf_single <- function(x, y, s0 = 1) {
+  x <- x - mean(x); y <- y - mean(y)
+  if (var(x) == 0) return(-Inf)
+  n    <- length(x)
+  xtx  <- sum(x^2); xty <- sum(x * y); yty <- sum(y^2)
+  r0   <- s0 / (s0 + 1/xtx)
+  sxy2 <- xty^2 / (xtx * yty)
+  (log(1 - r0) - n * log(1 - r0 * sxy2)) / 2
+}
+
+# ── null log marginal likelihood under IG(0,0) prior ─────────────────────
+log_ml_null <- function(y) {
+  y   <- y - mean(y)
+  n   <- length(y)
+  yty <- sum(y^2)
+  lgamma(n/2) - (n/2) * log(yty/2) - (n/2) * log(2*pi) + log(2)
+}
+
+# ── EM for mixture model ──────────────────────────────────────────────────
+run_mixture_em <- function(ad_j, dom_j, y, max_iter = 200, tol = 1e-8) {
+  y     <- y     - mean(y)
+  ad_j  <- ad_j  - mean(ad_j)
+  dom_j <- dom_j - mean(dom_j)
+  if (var(ad_j) == 0 & var(dom_j) == 0) return(NULL)
+
+  q      <- rep(0.5, length(y))
+  pi_mix <- 0.5
+  beta   <- coef(lm(y ~ dom_j))[2]
+  sigma2 <- var(y)
+  ll_old <- -Inf
+
+  for (iter in 1:max_iter) {
+    log_p1 <- log(pi_mix)     - (y - beta * dom_j)^2 / (2 * sigma2)
+    log_p0 <- log(1 - pi_mix) - (y - beta * ad_j)^2  / (2 * sigma2)
+    lse    <- pmax(log_p1, log_p0) +
+      log(exp(log_p1 - pmax(log_p1, log_p0)) +
+            exp(log_p0 - pmax(log_p1, log_p0)))
+    q      <- exp(log_p1 - lse)
+
+    pi_mix  <- pmax(pmin(mean(q), 1 - 1e-8), 1e-8)
+    x_eff   <- q * dom_j + (1 - q) * ad_j
+    x2_eff  <- x_eff^2 + q * (1 - q) * (dom_j - ad_j)^2
+    beta    <- sum(x_eff * y) / sum(x2_eff)
+    resid   <- y - beta * x_eff
+    sigma2  <- max(mean(resid^2 + beta^2 * q*(1-q)*(dom_j - ad_j)^2), 1e-8)
+
+    ll <- sum(lse)
+    if (abs(ll - ll_old) < tol) break
+    ll_old <- ll
+  }
+  list(q = q, pi_mix = pi_mix, beta = beta)
+}
+
+# ── proper mixture log BF ─────────────────────────────────────────────────
+compute_log_bf_mixture_proper <- function(ad_j, dom_j, y, s0 = 1) {
+  em <- run_mixture_em(ad_j, dom_j, y)
+  if (is.null(em)) return(-Inf)
+
+  n     <- length(y)
+  z_hat <- as.integer(em$q > 0.5)
+  n1    <- sum(z_hat); n0 <- n - n1
+  if (n1 < 5 | n0 < 5) return(-Inf)
+
+  idx0 <- which(z_hat == 0); idx1 <- which(z_hat == 1)
+  y0   <- y[idx0];            y1   <- y[idx1]
+  x0   <- ad_j[idx0];         x1   <- dom_j[idx1]
+
+  log_bf0      <- compute_log_ssbf_single(x0, y0, s0)
+  log_bf1      <- compute_log_ssbf_single(x1, y1, s0)
+  log_beta_bin <- lgamma(n1 + 1) + lgamma(n0 + 1) - lgamma(n + 2)
+  delta_null   <- log_ml_null(y) - log_ml_null(y0) - log_ml_null(y1)
+
+  log_bf0 + log_bf1 + log_beta_bin + delta_null
+}
+
+# ── full model assessment for one SNP ────────────────────────────────────
+assess_genetic_model <- function(snp_idx, AD, DOM, REC, y, s0 = 1) {
+  log_bfs <- c(
+    Additive  = compute_log_ssbf_single(AD[, snp_idx],  y, s0),
+    Dominant  = compute_log_ssbf_single(DOM[, snp_idx], y, s0),
+    Recessive = compute_log_ssbf_single(REC[, snp_idx], y, s0),
+    Mixture   = compute_log_bf_mixture_proper(AD[, snp_idx], DOM[, snp_idx], y, s0)
+  )
+  log_bfs_stable <- log_bfs - max(log_bfs[is.finite(log_bfs)])
+  post_probs     <- exp(log_bfs_stable) / sum(exp(log_bfs_stable))
+  data.frame(SNP       = snp_idx,
+             Model     = names(log_bfs),
+             log_BF    = log_bfs,
+             Post_Prob = post_probs,
+             row.names = NULL)
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. RUN ASSESSMENT ON CAUSAL SNPS
+# ─────────────────────────────────────────────────────────────────────────────
+results <- do.call(rbind, lapply(seq_along(causal_snps), function(k) {
+  df            <- assess_genetic_model(causal_snps[k], AD, DOM, REC, y)
+  df$True_Model <- true_models[k]
+  df
+}))
+
+print(results)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. SIMULATION BENCHMARK
+#    For each scenario, repeat n_sim times and check if the correct model
+#    has the highest posterior probability
+# ─────────────────────────────────────────────────────────────────────────────
+run_sim <- function(snp_idx, true_model, AD, DOM, REC,
+                    beta_effect = 2, n_sim = 100, s0 = 1) {
+  n       <- nrow(AD)
+  correct <- numeric(n_sim)
+
+  for (s in 1:n_sim) {
+    # generate y under true model
+    noise <- rnorm(n)
+    if (true_model == "additive") {
+      y_sim <- beta_effect * scale(AD[, snp_idx])  + noise
+    } else if (true_model == "dominant") {
+      y_sim <- beta_effect * scale(DOM[, snp_idx]) + noise
+    } else if (true_model == "recessive") {
+      y_sim <- beta_effect * scale(REC[, snp_idx]) + noise
+    } else if (true_model == "mixture") {
+      z     <- sample(c(0, 1), n, replace = TRUE)
+      y_sim <- z * beta_effect * DOM[, snp_idx] +
+        (1 - z) * (-beta_effect) * AD[, snp_idx] + noise
+    }
+    y_sim <- as.numeric(scale(y_sim))
+
+    res <- assess_genetic_model(snp_idx, AD, DOM, REC, y_sim, s0)
+
+    # which model has highest posterior?
+    best_model <- res$Model[which.max(res$Post_Prob)]
+    correct[s] <- (best_model == tools::toTitleCase(true_model))
+  }
+
+  data.frame(
+    SNP        = snp_idx,
+    True_Model = true_model,
+    Accuracy   = mean(correct),
+    SE         = sqrt(mean(correct) * (1 - mean(correct)) / n_sim)
+  )
+}
+
+set.seed(123)
+sim_results <- do.call(rbind, mapply(
+  run_sim,
+  snp_idx    = causal_snps,
+  true_model = true_models,
+  MoreArgs   = list(AD = AD, DOM = DOM, REC = REC,
+                    beta_effect = 2, n_sim = 100),
+  SIMPLIFY   = FALSE
+))
+
+print(sim_results)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. VISUALISE
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Panel A: posterior model probabilities for the single simulated dataset
+results$SNP_label <- paste0("SNP ", results$SNP,
+                            "\n(true: ", results$True_Model, ")")
+
+pA <- ggplot(results, aes(x = Model, y = Post_Prob, fill = Model)) +
+  geom_col() +
+  facet_wrap(~SNP_label) +
+  scale_fill_manual(values = c(Additive  = "#1A85FF",
+                               Dominant  = "#D41159",
+                               Recessive = "darkgreen",
+                               Mixture   = "orange")) +
+  labs(y     = "Posterior model probability",
+       x     = "Genetic model",
+       title = "A: Model assessment — single simulation") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 10))
+
+# Panel B: accuracy across n_sim replications with 95% CI
+pB <- ggplot(sim_results,
+             aes(x = True_Model, y = Accuracy,
+                 ymin = Accuracy - 1.96 * SE,
+                 ymax = Accuracy + 1.96 * SE,
+                 colour = True_Model)) +
+  geom_point(size = 3) +
+  geom_errorbar(width = 0.2) +
+  geom_hline(yintercept = 0.95, linetype = "dashed") +
+  scale_colour_manual(values = c(additive  = "#1A85FF",
+                                 dominant  = "#D41159",
+                                 recessive = "darkgreen",
+                                 mixture   = "orange")) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(y     = "Proportion correct model selected",
+       x     = "True genetic model",
+       title = "B: Model classification accuracy (100 simulations)") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "none")
+
+gridExtra::grid.arrange(pA, pB, nrow = 2)

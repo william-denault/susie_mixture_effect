@@ -1,0 +1,373 @@
+library(susieR)
+library(ggplot2)
+library(gridExtra)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. DATA SETUP
+# ─────────────────────────────────────────────────────────────────────────────
+data(N3finemapping)
+X_raw <- N3finemapping$X
+n     <- nrow(X_raw)
+p     <- ncol(X_raw)
+
+# Recode each SNP into additive (0/1/2), dominant (0/1/1), recessive (0/0/1)
+# Most-frequent genotype coded as 0
+recode_snp <- function(x) {
+  sorted_vals <- names(sort(table(x), decreasing = TRUE))
+  ad          <- match(x, sorted_vals) - 1
+  list(ad  = ad,
+       dom = as.integer(ad >= 1),
+       rec = as.integer(ad == 2))
+}
+
+AD <- DOM <- REC <- matrix(0, n, p)
+for (j in 1:p) {
+  rc       <- recode_snp(X_raw[, j])
+  AD[, j]  <- rc$ad
+  DOM[, j] <- rc$dom
+  REC[, j] <- rc$rec
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. SNP SUITABILITY FILTER
+#    The AD/DOM mixture model requires all three genotype classes to be
+#    reasonably populated. Low-MAF SNPs have nearly identical AD and DOM
+#    codings, making individual-level model assignment unidentifiable.
+# ─────────────────────────────────────────────────────────────────────────────
+is_suitable_snp <- function(j, AD, min_per_class = 20) {
+  tb <- table(AD[, j])
+  length(tb) == 3 && min(tb) >= min_per_class
+}
+
+suitable_snps <- which(sapply(1:p, is_suitable_snp, AD = AD,
+                              min_per_class = 20))
+cat("SNPs suitable for mixture testing:", length(suitable_snps), "\n")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. CORE FUNCTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Profile log-likelihood under Gaussian model ───────────────────────────────
+# BIC-based model comparison ensures consistent penalisation across all models:
+#
+#   Model       | Extra params vs null | BIC penalty
+#   ------------|----------------------|------------
+#   Additive    | 1 (beta)             | log(n)/2
+#   Dominant    | 1 (beta)             | log(n)/2
+#   Recessive   | 1 (beta)             | log(n)/2
+#   Mixture     | 3 (b0, b1, pi)       | 3*log(n)/2
+#
+# For large n the BIC approximation to the Bayes factor is accurate.
+# The single-model SS-SER BF (exact Bayesian) converges to BIC for large n.
+
+profile_loglik_null <- function(y) {
+  y <- y - mean(y); n <- length(y)
+  -n/2 * log(2*pi) - n/2 * log(sum(y^2)/n) - n/2
+}
+
+profile_loglik_single <- function(x, y) {
+  x <- x - mean(x); y <- y - mean(y)
+  if (var(x) == 0) return(-Inf)
+  n    <- length(x)
+  beta <- sum(x * y) / sum(x^2)
+  rss  <- sum((y - beta * x)^2)
+  -n/2 * log(2*pi) - n/2 * log(rss/n) - n/2
+}
+
+# ── EM for mixture model with SEPARATE betas per group ───────────────────────
+#
+#   Model:
+#     y_i = z_i * beta_1 * x_i^DOM + (1 - z_i) * beta_0 * x_i^AD + eps_i
+#     eps_i ~ N(0, sigma^2)        [shared residual variance]
+#     z_i | pi ~ Bernoulli(pi)
+#
+#   CRITICAL: separate beta_0 and beta_1 per group.
+#   A single shared beta collapses the EM after 2 iterations because
+#   the model cannot distinguish which coding applies to which individual.
+#   With separate betas, the EM recovers them reliably.
+#
+#   Returns the observed-data log-likelihood at convergence (= EM objective),
+#   used as the profile log-likelihood in the BIC comparison.
+
+run_mixture_em <- function(ad_j, dom_j, y,
+                           q_init   = NULL,
+                           max_iter = 300,
+                           tol      = 1e-8) {
+  y_c   <- y     - mean(y)
+  ad_c  <- ad_j  - mean(ad_j)
+  dom_c <- dom_j - mean(dom_j)
+  
+  if (var(ad_c) == 0 | var(dom_c) == 0) return(NULL)
+  
+  n      <- length(y_c)
+  q      <- if (is.null(q_init)) rep(0.5, n) else
+    pmin(pmax(q_init, 1e-6), 1 - 1e-6)
+  pi_mix <- mean(q)
+  # warm-start betas from weighted OLS on initial responsibilities
+  beta0  <- sum((1 - q) * ad_c  * y_c) / (sum((1 - q) * ad_c^2)  + 1e-8)
+  beta1  <- sum(q       * dom_c * y_c) / (sum(q       * dom_c^2) + 1e-8)
+  sigma2 <- var(y_c)
+  ll_old <- -Inf
+  
+  for (iter in 1:max_iter) {
+    
+    # ── E-step: update responsibilities q_i = P(z_i = 1 | y_i) ─────────────
+    log_p1 <- log(pi_mix)       - (y_c - beta1 * dom_c)^2 / (2 * sigma2)
+    log_p0 <- log(1 - pi_mix)   - (y_c - beta0 * ad_c)^2  / (2 * sigma2)
+    mx     <- pmax(log_p1, log_p0)                         # log-sum-exp
+    lse    <- mx + log(exp(log_p1 - mx) + exp(log_p0 - mx))
+    q      <- exp(log_p1 - lse)
+    
+    # ── M-step: separate weighted OLS per group ──────────────────────────────
+    pi_mix <- pmax(pmin(mean(q), 1 - 1e-8), 1e-8)
+    beta1  <- sum(q       * dom_c * y_c) / (sum(q       * dom_c^2) + 1e-8)
+    beta0  <- sum((1 - q) * ad_c  * y_c) / (sum((1 - q) * ad_c^2)  + 1e-8)
+    sigma2 <- max(
+      mean(q * (y_c - beta1 * dom_c)^2 + (1 - q) * (y_c - beta0 * ad_c)^2),
+      1e-8
+    )
+    
+    ll <- sum(lse)
+    if (abs(ll - ll_old) < tol) break
+    ll_old <- ll
+  }
+  
+  list(q = q, pi_mix = pi_mix, beta0 = beta0, beta1 = beta1,
+       sigma2 = sigma2, ll = ll)
+}
+
+# ── Multi-start EM: returns best solution across n_starts random inits ────────
+run_mixture_em_multistart <- function(ad_j, dom_j, y,
+                                      n_starts = 20,
+                                      max_iter = 300,
+                                      tol      = 1e-8) {
+  best_ll  <- -Inf
+  best_res <- NULL
+  
+  for (s in 1:n_starts) {
+    res <- tryCatch(
+      run_mixture_em(ad_j, dom_j, y,
+                     q_init   = runif(length(y)),
+                     max_iter = max_iter,
+                     tol      = tol),
+      error = function(e) NULL
+    )
+    if (!is.null(res) && res$ll > best_ll) {
+      best_ll  <- res$ll
+      best_res <- res
+    }
+  }
+  best_res
+}
+
+# ── Genetic model assessment for a single SNP ─────────────────────────────────
+#
+# Returns posterior model probabilities under equal model priors,
+# based on BIC-adjusted profile log-likelihoods.
+
+assess_genetic_model <- function(snp_idx, AD, DOM, REC, y,
+                                 n_starts  = 20,
+                                 min_group = 10) {
+  
+  if (!(snp_idx %in% suitable_snps))
+    warning(sprintf(
+      "SNP %d may not be suitable for mixture testing (low MAF or missing genotype class)",
+      snp_idx))
+  
+  n_obs     <- length(y)
+  penalty_1 <- log(n_obs) / 2       # BIC: 1 extra parameter
+  penalty_3 <- 3 * log(n_obs) / 2   # BIC: 3 extra parameters
+  
+  L_null <- profile_loglik_null(y)
+  
+  # single-model BIC scores (relative to null)
+  score_ad  <- profile_loglik_single(AD[,  snp_idx], y) - L_null - penalty_1
+  score_dom <- profile_loglik_single(DOM[, snp_idx], y) - L_null - penalty_1
+  score_rec <- profile_loglik_single(REC[, snp_idx], y) - L_null - penalty_1
+  
+  # mixture BIC score
+  em <- run_mixture_em_multistart(AD[, snp_idx], DOM[, snp_idx], y,
+                                  n_starts = n_starts)
+  if (is.null(em)) {
+    score_mix <- -Inf
+  } else {
+    n1        <- sum(em$q > 0.5)
+    n0        <- n_obs - n1
+    score_mix <- if (n1 < min_group | n0 < min_group) -Inf else
+      em$ll - L_null - penalty_3
+  }
+  
+  # posterior model probabilities
+  log_bfs        <- c(Additive  = score_ad,
+                      Dominant  = score_dom,
+                      Recessive = score_rec,
+                      Mixture   = score_mix)
+  finite_max     <- max(log_bfs[is.finite(log_bfs)])
+  log_bfs_stable <- log_bfs - finite_max
+  post_probs     <- exp(log_bfs_stable) / sum(exp(log_bfs_stable))
+  
+  data.frame(
+    SNP       = snp_idx,
+    Model     = names(log_bfs),
+    log_BF    = round(log_bfs, 2),
+    Post_Prob = round(post_probs, 4),
+    row.names = NULL
+  )
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. SIMULATE PHENOTYPE WITH KNOWN ARCHITECTURE
+#
+#   Causal SNPs chosen from suitable_snps (all three genotype classes present).
+#
+#   Mixture: SAME-SIGN effects of DIFFERENT magnitude.
+#   This is the identifiable case and is biologically realistic
+#   (e.g. a regulatory SNP with stronger dominant than additive effects
+#   in a subset of individuals due to cell-type-specific chromatin context).
+# ─────────────────────────────────────────────────────────────────────────────
+set.seed(42)
+
+causal_snps <- suitable_snps[c(5, 15, 25, 35)]
+true_models <- c("additive", "dominant", "recessive", "mixture")
+
+cat("Causal SNPs chosen:", causal_snps, "\n")
+cat("Genotype distribution of mixture SNP (SNP", causal_snps[4], "):\n")
+print(table(AD[, causal_snps[4]]))
+
+y <- rnorm(n, sd = 0.5)
+y <- y + 2.0 * scale(AD[,  causal_snps[1]])   # purely additive
+y <- y + 2.0 * scale(DOM[, causal_snps[2]])   # purely dominant
+y <- y + 2.0 * scale(REC[, causal_snps[3]])   # purely recessive
+
+# mixture: half of individuals have dominant effect (beta=3),
+#          other half have additive effect (beta=1)
+is_dom_mix <- sample(c(0, 1), n, replace = TRUE)
+y <- y + is_dom_mix       * 3.0 * DOM[, causal_snps[4]] +
+  (1 - is_dom_mix) * 1.0 * AD[,  causal_snps[4]]
+y <- as.numeric(scale(y))
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. FINE-MAP WITH SUSIE ON STACKED MATRIX
+#    Stack AD, DOM, REC — SuSiE identifies associated SNPs
+#    without committing to a specific genetic model
+# ─────────────────────────────────────────────────────────────────────────────
+X_stacked <- cbind(AD, DOM, REC)
+colnames(X_stacked) <- c(paste0("AD_",  1:p),
+                         paste0("DOM_", 1:p),
+                         paste0("REC_", 1:p))
+
+res_susie <- susie(X_stacked, y, L = 10, verbose = FALSE)
+cat("\nCredible sets found:\n")
+print(res_susie$sets)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. MODEL ASSESSMENT FOR EACH CAUSAL SNP
+# ─────────────────────────────────────────────────────────────────────────────
+cat("\n=== Model assessment (single simulated dataset) ===\n")
+results <- do.call(rbind, lapply(seq_along(causal_snps), function(k) {
+  df            <- assess_genetic_model(causal_snps[k], AD, DOM, REC, y,
+                                        n_starts = 20)
+  df$True_Model <- true_models[k]
+  df
+}))
+print(results)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. SIMULATION BENCHMARK
+#    100 replications per model — measures classification accuracy
+# ─────────────────────────────────────────────────────────────────────────────
+run_benchmark <- function(snp_idx, true_model,
+                          beta_ad  = 1.0,
+                          beta_dom = 3.0,
+                          noise_sd = 1.0,
+                          n_sim    = 100,
+                          n_starts = 10) {
+  expected <- switch(true_model,
+                     additive  = "Additive",
+                     dominant  = "Dominant",
+                     recessive = "Recessive",
+                     mixture   = "Mixture")
+  correct <- logical(n_sim)
+  
+  for (s in 1:n_sim) {
+    noise <- rnorm(n, sd = noise_sd)
+    y_sim <- switch(true_model,
+                    additive  = beta_ad  * scale(AD[,  snp_idx]) + noise,
+                    dominant  = beta_dom * scale(DOM[, snp_idx]) + noise,
+                    recessive = beta_ad  * scale(REC[, snp_idx]) + noise,
+                    mixture   = {
+                      z <- sample(c(0, 1), n, replace = TRUE)
+                      z * beta_dom * DOM[, snp_idx] + (1 - z) * beta_ad * AD[, snp_idx] + noise
+                    }
+    )
+    y_sim     <- as.numeric(scale(y_sim))
+    res       <- assess_genetic_model(snp_idx, AD, DOM, REC, y_sim,
+                                      n_starts = n_starts)
+    correct[s] <- (res$Model[which.max(res$Post_Prob)] == expected)
+  }
+  
+  data.frame(
+    True_Model = true_model,
+    SNP        = snp_idx,
+    Accuracy   = mean(correct),
+    SE         = sqrt(mean(correct) * (1 - mean(correct)) / n_sim)
+  )
+}
+
+set.seed(123)
+cat("\n=== Simulation benchmark (100 reps per model) ===\n")
+sim_results <- do.call(rbind, lapply(seq_along(causal_snps), function(k) {
+  cat("  Benchmarking:", true_models[k], "\n")
+  run_benchmark(causal_snps[k], true_models[k],
+                beta_ad = 1, beta_dom = 3, noise_sd = 1,
+                n_sim = 100, n_starts = 10)
+}))
+print(sim_results)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. VISUALISE
+# ─────────────────────────────────────────────────────────────────────────────
+model_colors <- c(Additive  = "#1A85FF",
+                  Dominant  = "#D41159",
+                  Recessive = "darkgreen",
+                  Mixture   = "orange")
+
+# Panel A: posterior model probabilities for single simulated dataset
+results$SNP_label <- paste0("SNP ", results$SNP,
+                            "\n(true: ", results$True_Model, ")")
+
+pA <- ggplot(results, aes(x = Model, y = Post_Prob, fill = Model)) +
+  geom_col() +
+  facet_wrap(~SNP_label, nrow = 1) +
+  scale_fill_manual(values = model_colors) +
+  labs(y     = "Posterior model probability",
+       x     = "Genetic model",
+       title = "A: Model assessment — single simulation") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "none",
+        strip.text      = element_text(size = 9))
+
+# Panel B: classification accuracy with 95% CI across 100 replications
+sim_results$True_Model <- factor(sim_results$True_Model, levels = true_models)
+
+pB <- ggplot(sim_results,
+             aes(x      = True_Model,
+                 y      = Accuracy,
+                 ymin   = pmax(0, Accuracy - 1.96 * SE),
+                 ymax   = pmin(1, Accuracy + 1.96 * SE),
+                 colour = True_Model)) +
+  geom_point(size = 3) +
+  geom_errorbar(width = 0.2, linewidth = 0.8) +
+  geom_hline(yintercept = 0.95, linetype = "dashed", colour = "grey40") +
+  scale_colour_manual(values = c(additive  = "#1A85FF",
+                                 dominant  = "#D41159",
+                                 recessive = "darkgreen",
+                                 mixture   = "orange")) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.25)) +
+  labs(y     = "Proportion correct model selected",
+       x     = "True genetic model",
+       title = "B: Classification accuracy (100 simulations per model)") +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "none")
+
+grid.arrange(pA, pB, nrow = 2)
