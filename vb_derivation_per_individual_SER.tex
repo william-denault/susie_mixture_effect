@@ -1,0 +1,135 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,amsthm,bm,geometry,booktabs}
+\geometry{margin=1in}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\rim}{r_{im}}
+\DeclareMathOperator{\Dir}{Dirichlet}
+\title{Variational inference for the per-individual mixture SER,\\
+and reading off the model verdict (mixture vs.\ additive/dominant/recessive)}
+\author{derivation note for CHIMERA / SuSiE-Mix (SuSiE-PIM)}
+\date{\today}
+\begin{document}
+\maketitle
+
+\section{Model: one variant, per-individual mixture}
+Fix a candidate variant with codings $x_i^A,x_i^D,x_i^R$ (centred), $m\in\{A,D,R\}$,
+residual variance $\sigma^2$ supplied by SuSiE. Latents: a per-individual coding
+type $z_i$ and effects $\bm\beta=(\beta_A,\beta_D,\beta_R)$, mixing weights
+$\bm\pi$.
+\begin{align}
+\bm\pi&\sim\Dir(\bm a_0), &
+z_i\mid\bm\pi&\sim\mathrm{Cat}(\bm\pi), &
+\beta_m&\sim\N(0,\sigma_{0m}^2), &
+y_i\mid z_i{=}m,\bm\beta&\sim\N\!\big(x_i^m\beta_m,\sigma^2\big).
+\label{eq:model}
+\end{align}
+Write $\rim=q(z_i{=}m)$. We use the mean-field family
+$q(\bm z,\bm\beta,\bm\pi)=\big(\prod_i q(z_i)\big)\big(\prod_m q(\beta_m)\big)\,q(\bm\pi)$
+and maximise the ELBO by coordinate ascent (CAVI). Each block update is the
+exponential of the expected complete-data log-joint with respect to the other
+factors.
+
+\section{CAVI updates}
+The complete-data log-joint is, up to constants,
+\begin{equation}
+\log p=\log\Dir(\bm\pi;\bm a_0)+\sum_m\Big(\!-\tfrac{\beta_m^2}{2\sigma_{0m}^2}\Big)
++\sum_i\sum_m \mathbf 1\{z_i{=}m\}\Big[\log\pi_m-\tfrac{(y_i-x_i^m\beta_m)^2}{2\sigma^2}\Big].
+\end{equation}
+
+\paragraph{(a) Effects $q(\beta_m)=\N(\mu_m,s_m^2)$.}
+Collecting $\beta_m$-terms in $\E_q[\log p]$ (with $\E_q[\mathbf 1\{z_i{=}m\}]=\rim$):
+$-\tfrac{\beta_m^2}{2\sigma_{0m}^2}-\tfrac1{2\sigma^2}\sum_i \rim\big(\!-2x_i^m y_i\beta_m+(x_i^m)^2\beta_m^2\big)$,
+a Gaussian in $\beta_m$, hence
+\begin{equation}
+\boxed{\;s_m^2=\Big(\tfrac1{\sigma_{0m}^2}+\tfrac1{\sigma^2}\textstyle\sum_i \rim (x_i^m)^2\Big)^{-1},
+\qquad
+\mu_m=\tfrac{s_m^2}{\sigma^2}\textstyle\sum_i \rim\, x_i^m y_i\; }.
+\label{eq:beta}
+\end{equation}
+These are responsibility-weighted Bayesian regressions, one per coding.
+
+\paragraph{(b) Mixing weights $q(\bm\pi)=\Dir(\bm\alpha)$.}
+Collecting $\bm\pi$-terms gives a Dirichlet with
+\begin{equation}
+\boxed{\;\alpha_m=a_{0m}+\textstyle\sum_i \rim\;},\qquad
+\E_q[\log\pi_m]=\psi(\alpha_m)-\psi(\textstyle\sum_{m'}\alpha_{m'}).
+\label{eq:pi}
+\end{equation}
+
+\paragraph{(c) Responsibilities $q(z_i)$.}
+$\log \rim = \E_q[\log\pi_m]+\E_q\!\big[\log\N(y_i;x_i^m\beta_m,\sigma^2)\big]+\mathrm{const}$.
+Using $\E_q[\beta_m]=\mu_m$, $\E_q[\beta_m^2]=\mu_m^2+s_m^2$ and dropping
+$i$-constant terms ($y_i^2$, $\psi(\sum\alpha)$),
+\begin{equation}
+\boxed{\;\rim\ \propto\ \exp\!\Big\{\psi(\alpha_m)-\tfrac1{2\sigma^2}\big(-2x_i^m y_i\mu_m+(x_i^m)^2(\mu_m^2+s_m^2)\big)\Big\}\;},
+\quad \textstyle\sum_m \rim=1.
+\label{eq:resp}
+\end{equation}
+
+\paragraph{(d) Empirical-Bayes prior variance.}
+Maximising the ELBO over $\sigma_{0m}^2$ gives the closed update
+$\sigma_{0m}^2=\E_q[\beta_m^2]=\mu_m^2+s_m^2$.
+
+\paragraph{ELBO.} Iterating (a)--(d) monotonically increases
+\begin{align}
+\mathcal L
+&=\sum_i\sum_m \rim\Big[-\tfrac12\log(2\pi\sigma^2)
+-\tfrac1{2\sigma^2}\big(y_i^2-2x_i^m y_i\mu_m+(x_i^m)^2(\mu_m^2+s_m^2)\big)\Big]\nonumber\\
+&\quad+\underbrace{\sum_i\sum_m \rim\big(\psi(\alpha_m)-\psi(\alpha_0)\big)-\sum_i\sum_m \rim\log \rim}_{\text{$z$ prior cross-term $+$ entropy}}
+-\sum_m \KL\!\big(\N(\mu_m,s_m^2)\,\|\,\N(0,\sigma_{0m}^2)\big)
+-\KL\!\big(\Dir(\bm\alpha)\,\|\,\Dir(\bm a_0)\big),
+\label{eq:elbo}
+\end{align}
+with $\alpha_0=\sum_m\alpha_m$, the Gaussian KL
+$\tfrac12[\log(\sigma_{0m}^2/s_m^2)+(s_m^2+\mu_m^2)/\sigma_{0m}^2-1]$, and the
+Dirichlet KL
+$\log\frac{B(\bm a_0)}{B(\bm\alpha)}+\sum_m(\alpha_m-a_{0m})(\psi(\alpha_m)-\psi(\alpha_0))$.
+(Monotone increase verified numerically; $\E[\bm\pi]=\bm\alpha/\alpha_0$ and the
+$\mu_m$ recover the data-generating values.)
+
+\section{From one variant to the SER, and the model verdict}
+For each variant $j$ we score \emph{four} sub-models and combine them.
+\begin{itemize}\itemsep1pt
+\item Pure $m\in\{A,D,R\}$: closed-form single-coding log marginal likelihood
+$\ell^{\mathrm{pure}}_{jm}$ (the standard SER term).
+\item Mixture: the converged ELBO $\mathcal L_j$ of \eqref{eq:elbo}, a lower bound
+on the mixture log marginal likelihood (so the verdict is conservative: it never
+over-declares a mixture).
+\end{itemize}
+With sub-model prior weights $\bm w=(w_A,w_D,w_R,w_{\mathrm{mix}})$ and
+$\bm\ell_j=(\ell^{\mathrm{pure}}_{jA},\ell^{\mathrm{pure}}_{jD},\ell^{\mathrm{pure}}_{jR},\mathcal L_j)$:
+\begin{align}
+\text{variant log-ML}\quad & L_j=\log\!\textstyle\sum_k w_k e^{\ell_{jk}},\\
+\text{model posterior}\quad & P(\text{model }k\mid j)=\frac{w_k e^{\ell_{jk}}}{\sum_{k'}w_{k'}e^{\ell_{jk'}}},\\
+\text{variant posterior (SER output)}\quad & \alpha_j\propto \rho_j\,e^{\,L_j-\ell^{\mathrm{null}}},\qquad \textstyle\sum_j\alpha_j=1 .
+\label{eq:ser}
+\end{align}
+The \textbf{verdict} for the selected variant is $\arg\max_k P(\text{model }k\mid j)$:
+``\,mixture\,'' iff $k=\mathrm{mix}$, otherwise the winning pure coding
+(additive / dominant / recessive); when a mixture is called, report
+$\E[\bm\pi]=\bm\alpha/\alpha_0$.
+
+\paragraph{IBSS plug-in.} The single effect's posterior-mean contribution
+(the vector IBSS subtracts) is the model-averaged fit
+\begin{equation}
+\widehat{\bm f}=\sum_j \alpha_j\Big[\,\sum_{m}P(\text{pure }m\mid j)\,\hat\beta^{\mathrm{pure}}_{jm}\,x^m_{\cdot j}
++P(\mathrm{mix}\mid j)\,\textstyle\sum_m r^{(j)}_{\cdot m}\mu^{(j)}_m x^m_{\cdot j}\Big].
+\end{equation}
+Because IBSS only needs $\{\alpha_j\}$ and $\widehat{\bm f}$, this SER drops into
+the existing loop and yields SuSiE-PIM, while each credible set inherits the
+verdict and $\E[\bm\pi]$.
+
+\paragraph{Efficiency.} The closed-form pure scores are computed for all $p$
+variants; the mixture VB is run only for the top $K$ variants by best pure score
+(others cannot be labelled a mixture). Per-SER cost is then $O(np)$ plus $K$ small
+CAVI fits, i.e.\ close to a standard SER.
+
+\paragraph{Identifiability caveat.} Additive and dominant codings coincide at
+$g{=}1$ and differ only at $g{=}2$; hence within the non-recessive part of a
+mixture the additive-vs-dominant split is weakly identified. The
+\emph{mixture-vs-pure} verdict and the recessive mass are robust; the precise
+$(\pi_A,\pi_D)$ partition should be read with this collinearity in mind.
+
+\end{document}
