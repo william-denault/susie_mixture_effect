@@ -1,0 +1,279 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,amsthm,bm,geometry,booktabs}
+\geometry{margin=1in}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\title{Model fitting and detection power for the per-individual\\
+mixture-effect SNP model}
+\author{W.\ R.\ P.\ Denault \quad (derivation note for CHIMERA / SuSiE-Mix)}
+\date{\today}
+\begin{document}
+\maketitle
+
+\noindent\textbf{Conventions.} One causal SNP, genotype $g_i\in\{0,1,2\}$ with
+Hardy--Weinberg frequencies $p_0=(1-f)^2,\ p_1=2f(1-f),\ p_2=f^2$. Codings
+$x^A(g)=g,\ x^D(g)=\mathbf 1\{g\ge1\},\ x^R(g)=\mathbf 1\{g=2\}$. Errors
+$\N(0,\sigma^2)$. Standardized effect $\theta=\beta/\sigma$; for an eQTL of
+variance-explained $h^2$, $\theta=\sqrt{h^2/(2f(1-f))}$, typically $0.05$--$0.3$.
+All leading constants below are verified against numerical
+Kullback--Leibler (KL) minimization to $\ge 3$ significant figures.
+
+\section{The model and its reduction to three genotype strata}
+Latent responder type $z_i\in\{A,D,R\}$, $P(z_i=m)=\pi_m$, independent of $g_i$,
+with
+\begin{equation}
+y_i\mid z_i{=}m,g_i\sim \N\!\big(x^m(g_i)\beta_m,\sigma^2\big),\qquad
+p(y\mid g)=\sum_{m}\pi_m\,\phi_\sigma\!\big(y-x^m(g)\beta_m\big),
+\label{eq:model}
+\end{equation}
+$\phi_\sigma$ the $\N(0,\sigma^2)$ density. Because $g$ takes three values, the
+likelihood factorizes over the three conditional laws $P_g$, and these are the
+\emph{entire} observable content:
+\begin{align*}
+P_0&=\N(0,\sigma^2) &&\text{(all codings vanish at $g=0$: \emph{no information})},\\
+P_1&=\pi_A\N(\beta_A,\sigma^2)+\pi_D\N(\beta_D,\sigma^2)+\pi_R\N(0,\sigma^2),\\
+P_2&=\pi_A\N(2\beta_A,\sigma^2)+\pi_D\N(\beta_D,\sigma^2)+\pi_R\N(\beta_R,\sigma^2).
+\end{align*}
+Each $P_g$ is a Gaussian \emph{location} mixture with common variance: the
+convolution of $\N(0,\sigma^2)$ with a discrete \emph{mixing measure}
+$Q_g=\sum_m\pi_m\delta_{a_{gm}}$, $a_{gm}=x^m(g)\beta_m$. Write the central
+moments (cumulants) of $Q_g$ as $c_{k,g}$, so $P_g$ has mean $\bar a_g=c_{1,g}$,
+variance $\sigma^2+c_{2,g}$, and cumulants $\kappa_{k}(P_g)=c_{k,g}$ for $k\ge3$.
+Crucially, since every $a_{gm}=O(\theta\sigma)$,
+\begin{equation}
+c_{2,g}=O(\theta^2),\qquad c_{3,g}=O(\theta^3),\qquad c_{4,g}=O(\theta^4).
+\label{eq:cumorders}
+\end{equation}
+
+\section{Fitting the three competing models}
+
+\subsection{Additive (1 d.f.)}
+$y_i=\beta_0+\alpha g_i+\varepsilon_i$. OLS gives
+$\hat\alpha=\widehat{\Cov}(g,y)/\widehat{\Var}(g)$,
+$\hat\sigma^2_{\mathrm{add}}=\tfrac1n\sum_i(y_i-\hat\beta_0-\hat\alpha g_i)^2$.
+Bayesian single-effect Bayes factor (Wang et al.\ 2020), prior
+$\alpha\sim\N(0,\sigma_0^2)$, $\sigma^2$ plugged in: with $\hat\alpha=x^\top y/x^\top x$,
+$s^2=\sigma^2/x^\top x$ ($x$ the centred additive coding),
+\begin{equation}
+\log\mathrm{BF}_{\mathrm{add}}
+=\tfrac12\log\frac{s^2}{\sigma_0^2+s^2}
++\tfrac12\,\hat\alpha^2\!\left(\frac1{s^2}-\frac1{\sigma_0^2+s^2}\right).
+\label{eq:bfadd}
+\end{equation}
+
+\subsection{Genotypic / saturated mean (2 d.f.)}
+$\E[y\mid g]=\mu_g$ free. MLE: $\hat\mu_g=\bar y_g$ (stratum means);
+homoscedastic $\hat\sigma^2=\tfrac1n\sum_g\sum_{i\in g}(y_i-\bar y_g)^2$;
+heteroscedastic $\hat\sigma_g^2=\tfrac1{n_g}\sum_{i\in g}(y_i-\bar y_g)^2$.
+The genotypic mean space is spanned by $Z=[\,x^D\,|\,x^R\,]$ (dominant and
+recessive codings span the 2-d.f.\ deviation from the intercept). For
+$b\sim\N(0,V_0 I_2)$ and plugged-in $\sigma^2$, the closed-form Bayes factor is
+\begin{equation}
+\log\mathrm{BF}_{\mathrm{geno}}
+=-\tfrac12\log\det\!\Big(I_2+\tfrac{V_0}{\sigma^2}Z^\top Z\Big)
++\tfrac1{2\sigma^2}\,(Z^\top y)^\top\!\Big(\tfrac{\sigma^2}{V_0}I_2+Z^\top Z\Big)^{-1}\!(Z^\top y).
+\label{eq:bfgeno}
+\end{equation}
+(Equations \eqref{eq:bfadd}--\eqref{eq:bfgeno} are the $q=1,2$ cases of the
+general Gaussian-prior linear-model BF; both match the exact multivariate-normal
+marginal likelihood to $\sim10^{-13}$.)
+
+\subsection{Per-individual mixture (EM)}
+Treating $z_i$ as missing, the complete-data log-likelihood is
+$\ell_c=\sum_i\sum_m\mathbf 1\{z_i{=}m\}\big[\log\pi_m-\tfrac1{2\sigma^2}(y_i-x^m(g_i)\beta_m)^2\big]+\text{const}$.
+
+\noindent\emph{E-step.}
+\begin{equation}
+w_{im}=\frac{\pi_m\,\phi_\sigma\!\big(y_i-x^m(g_i)\beta_m\big)}
+{\sum_{m'}\pi_{m'}\,\phi_\sigma\!\big(y_i-x^{m'}(g_i)\beta_{m'}\big)}.
+\end{equation}
+\noindent\emph{M-step} (maximize $\E[\ell_c]$ under $\sum_m\pi_m=1$):
+\begin{equation}
+\pi_m=\frac1n\sum_i w_{im},\quad
+\beta_m=\frac{\sum_i w_{im}\,x^m(g_i)\,y_i}{\sum_i w_{im}\,x^m(g_i)^2},\quad
+\sigma^2=\frac1n\sum_{i,m}w_{im}\big(y_i-x^m(g_i)\beta_m\big)^2.
+\end{equation}
+The $\beta_m$ updates are weighted least squares; the algorithm increases the
+observed log-likelihood $\ell=\sum_i\log\big[\sum_m\pi_m\phi_\sigma(y_i-x^m(g_i)\beta_m)\big]$
+monotonically. Under the null $\pi_D=\pi_R=0$ the parameters $\beta_D,\beta_R$
+are \emph{unidentified}, which drives the non-regularity in \S\ref{sec:nonreg}.
+
+\section{What is identifiable, and at which order}
+Let $\mathcal M_{\mathrm{add}}\subset\mathcal M_{\mathrm{geno}}^{\mathrm{hom}}
+\subset\mathcal M_{\mathrm{geno}}^{\mathrm{het}}$ denote the model classes. For a
+truth $P^\ast$ generated by \eqref{eq:model}, the per-observation expected
+log-likelihood ratio between the best fit in the mixture model
+($\KL=0$) and the best fit in a null class $\mathcal M_0$ is exactly the
+\emph{separation information}
+\begin{equation}
+I_{\mathrm{sep}}(\mathcal M_0)=\min_{Q\in\mathcal M_0}\KL(P^\ast\,\|\,Q)
+=\sum_g p_g\,\min_{Q_g\in\mathcal M_0}\KL(P_g\,\|\,Q_g).
+\end{equation}
+
+\begin{lemma}[Gaussian KL decomposition]\label{lem:decomp}
+For any distribution $P$ with mean $\mu$, variance $v$, and a Gaussian $\N(m,s)$,
+\[
+\KL\big(P\,\|\,\N(m,s)\big)=J(P)+\tfrac12\Big(\tfrac{v}{s}-1-\log\tfrac{v}{s}\Big)
++\tfrac{(\mu-m)^2}{2s},
+\]
+where $J(P)=\KL(P\,\|\,\N(\mu,v))$ is the negentropy, with the Edgeworth expansion
+$J(P)=\dfrac{\kappa_3(P)^2}{12\,v^3}+\dfrac{\kappa_4(P)^2}{48\,v^4}+O(\kappa^3).$
+\end{lemma}
+\noindent The three terms isolate \emph{shape}, \emph{variance}, and \emph{mean}
+mismatch. Minimizing over each null class and using \eqref{eq:cumorders} gives:
+
+\begin{proposition}[Detection-information hierarchy]\label{prop:hier}
+As $\theta\to0$,
+\begin{align}
+I_{\mathrm{sep}}(\mathcal M_{\mathrm{add}})
+&=\frac{1}{2\sigma^2}\sum_g p_g\,r_g^2+O(\theta^4)
+=\Theta(\theta^2), \label{eq:Iadd}\\[2pt]
+I_{\mathrm{sep}}(\mathcal M_{\mathrm{geno}}^{\mathrm{hom}})
+&=\frac14\,\Var_p\!\Big(\tfrac{c_{2,g}}{\sigma^2}\Big)+O(\theta^6)
+=\Theta(\theta^4), \label{eq:Ihom}\\[2pt]
+I_{\mathrm{sep}}(\mathcal M_{\mathrm{geno}}^{\mathrm{het}})
+&=\sum_g p_g\,\frac{c_{3,g}^2}{12\,\sigma^6}+O(\theta^8)
+=\Theta(\theta^6)\ \ \big(\Theta(\theta^8)\text{ if }c_{3,g}\!\equiv\!0\big),
+\label{eq:Ihet}
+\end{align}
+where $r_g$ is the weighted-least-squares residual of the stratum means
+$\{\bar a_g\}$ against a function linear in $g$ (so $\sum_g p_g r_g^2$ is the
+\emph{dominance deviation} $d=\bar a_2-2\bar a_1+\bar a_0$, up to a positive
+constant), $c_{2,g}=\pi(1-\pi)\Delta_g^2$ is the excess within-genotype variance
+with $\Delta_g$ the spread of component means, and $\Var_p$ is over genotype
+frequencies.
+\end{proposition}
+
+\begin{proof}[Proof sketch]
+By Lemma~\ref{lem:decomp}. (i) $\mathcal M_{\mathrm{add}}$ constrains the means
+to be affine in $g$ and shares a common variance; the leading term is the mean
+mismatch $\sum_g p_g(\bar a_g-m_g)^2/(2\sigma^2)$, minimized by WLS, giving
+\eqref{eq:Iadd}; the dominance deviation is $O(\theta)$ so this is $\Theta(\theta^2)$.
+(ii) $\mathcal M_{\mathrm{geno}}^{\mathrm{hom}}$ matches the means exactly,
+leaving the variance-mismatch term; with $v_g/\sigma^2=1+\delta_g$,
+$\delta_g=c_{2,g}/\sigma^2=O(\theta^2)$, expand
+$\tfrac12(\tfrac{v_g}{s}-1-\log\tfrac{v_g}{s})\approx\tfrac14(\delta_g-\bar\delta)^2$
+and minimize the common variance $s$ over $\bar\delta=\sum_g p_g\delta_g$, giving
+$\tfrac14\Var_p(\delta_g)=\Theta(\theta^4)$. (iii)
+$\mathcal M_{\mathrm{geno}}^{\mathrm{het}}$ matches mean and variance per stratum,
+leaving only the negentropy $J(P_g)=c_{3,g}^2/(12\sigma^6)+O(\theta^8)$, which is
+$\Theta(\theta^6)$ (and $\Theta(\theta^8)$ when the mixing is symmetric, e.g.
+$\pi=\tfrac12$, where $c_{3,g}=0$). \qed
+\end{proof}
+
+\paragraph{Numerical verification of the constants (not just the orders).}
+Two-type truth (additive responders weight $1{-}\pi$, effect $\theta$; recessive
+responders weight $\pi$, effect $c_R\theta$), $\pi=0.3$, $c_R=2$, $f=0.4$:
+\begin{center}\small
+\begin{tabular}{ccccccc}
+\toprule
+$\theta$ & $I_{\mathrm{add}}$ num & pred & $I_{\mathrm{hom}}$ num & pred & $I_{\mathrm{het}}$ num & pred\\
+\midrule
+0.05 & $2.593\!\times\!10^{-5}$ & $2.592\!\times\!10^{-5}$ & $1.719\!\times\!10^{-8}$ & $1.720\!\times\!10^{-8}$ & $4.40\!\times\!10^{-12}$ & $4.41\!\times\!10^{-12}$\\
+0.10 & $1.038\!\times\!10^{-4}$ & $1.037\!\times\!10^{-4}$ & $2.749\!\times\!10^{-7}$ & $2.752\!\times\!10^{-7}$ & $2.81\!\times\!10^{-10}$ & $2.82\!\times\!10^{-10}$\\
+0.20 & $4.173\!\times\!10^{-4}$ & $4.147\!\times\!10^{-4}$ & $4.384\!\times\!10^{-6}$ & $4.403\!\times\!10^{-6}$ & $1.77\!\times\!10^{-8}$ & $1.81\!\times\!10^{-8}$\\
+0.30 & $9.460\!\times\!10^{-4}$ & $9.331\!\times\!10^{-4}$ & $2.208\!\times\!10^{-5}$ & $2.229\!\times\!10^{-5}$ & $1.97\!\times\!10^{-7}$ & $2.06\!\times\!10^{-7}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Detection power and required sample size}
+\subsection{Likelihood-ratio test against a fixed null}
+Let $\Lambda_n=\ell_n(\hat\vartheta_{\mathcal M_1})-\ell_n(\hat\vartheta_{\mathcal M_0})$.
+When the truth lies in $\mathcal M_1$ (mixture), the law of large numbers gives
+$n^{-1}\Lambda_n\to I_{\mathrm{sep}}(\mathcal M_0)$ a.s., hence
+\begin{equation}
+\E[2\Lambda_n]\ \approx\ 2n\,I_{\mathrm{sep}}(\mathcal M_0).
+\label{eq:lrtmean}
+\end{equation}
+\emph{Check:} $\mathcal M_0=\mathcal M_{\mathrm{geno}}^{\mathrm{hom}}$, $\theta=0.3$:
+\eqref{eq:lrtmean} predicts $2n I_{\mathrm{hom}}=2.23$ at $n=5\times10^4$; direct
+simulation of the EM-LRT gives mean $2.29$.
+
+For a regular nested comparison with $r$ extra degrees of freedom, under local
+alternatives $2\Lambda_n\sim\chi^2_r(\lambda)$ with noncentrality
+$\lambda=2n\,I_{\mathrm{sep}}$. To attain power $1-\beta$ at level $\alpha$ one
+needs $\lambda\ge\lambda^\ast_{\alpha,\beta,r}$, hence
+\begin{equation}
+\boxed{\,n^\ast=\dfrac{\lambda^\ast_{\alpha,\beta,r}}{2\,I_{\mathrm{sep}}(\mathcal M_0)}\,},
+\qquad
+\lambda^\ast_{\alpha,\beta,1}\approx\big(z_{1-\alpha}+z_{1-\beta}\big)^2 .
+\label{eq:nstar}
+\end{equation}
+Genome-wide screen ($\alpha=5\times10^{-8}$, $\beta=0.2$, $r=1$):
+$\lambda^\ast\approx(5.45+0.84)^2\approx39.6$, so $n^\ast\approx19.8/I_{\mathrm{sep}}$.
+
+\subsection{The decisive distinction: ``non-additive'' vs.\ ``a mixture''}
+Equation \eqref{eq:Iadd} shows non-additivity is detected at $\Theta(\theta^2)$:
+the dominance deviation. \textbf{This does not establish a per-individual
+mixture}---a single deterministic dominance/recessive dose--response produces the
+same mean structure. The mixture-specific content is the
+\emph{within-genotype overdispersion / non-Gaussianity}, detectable only against
+$\mathcal M_{\mathrm{geno}}$, i.e.\ at $\Theta(\theta^4)$ (homoscedastic null) or
+$\Theta(\theta^6)$ (heteroscedastic null, the honest confounder). Substituting
+the verified $I_{\mathrm{sep}}$ into \eqref{eq:nstar}:
+\begin{center}\small
+\begin{tabular}{cccc}
+\toprule
+$\theta$ & $n^\ast$ vs additive & $n^\ast$ vs genotypic (hom.) & $n^\ast$ vs genotypic (het.)\\
+\midrule
+0.10 & $\sim1.9\times10^{5}$ & $\sim7.2\times10^{7}$ & $\sim7\times10^{10}$\\
+0.20 & $\sim4.8\times10^{4}$ & $\sim4.5\times10^{6}$ & $\sim1.1\times10^{9}$\\
+0.30 & $\sim2.1\times10^{4}$ & $\sim8.9\times10^{5}$ & $\sim9.6\times10^{7}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+For GTEx whole blood ($n\approx670$) the mixture-vs-genotypic test is short of the
+required $n$ by $3$--$5$ (hom.) or $5$--$8$ (het.) orders of magnitude. A direct
+EM-LRT simulation confirms $0\%$ power at $n=670$, rising to only $\sim25\%$ at
+$n=5\times10^4$ for $\theta=0.3$; and a non-mixture heteroscedastic-genotypic
+locus triggers the same statistic, producing false ``mixture'' calls.
+
+\subsection{Locally most powerful test for the $\Theta(\theta^4)$ signal}
+Near the additive boundary the leading mixture departure from
+$\mathcal M_{\mathrm{geno}}^{\mathrm{hom}}$ is the heterogeneity of
+within-genotype variances $\delta_g=c_{2,g}/\sigma^2$. A Levene/Bartlett-type
+score test on the stratum variances has noncentrality, to leading order,
+\begin{equation}
+\lambda \;=\; 2n\,I_{\mathrm{sep}}(\mathcal M_{\mathrm{geno}}^{\mathrm{hom}})
+\;=\;\tfrac{n}{2}\,\Var_p\!\Big(\tfrac{c_{2,g}}{\sigma^2}\Big),
+\qquad
+\text{power}\approx\Phi\!\Big(\sqrt{\lambda}-z_{1-\alpha}\Big),
+\end{equation}
+giving $n^\ast=\Theta(\theta^{-4})$, consistent with \eqref{eq:Ihom}. This test
+is regular (the variance components are identified) and avoids fitting the
+unidentified mixture; it should be the workhorse, calibrated by simulation.
+
+\subsection{Non-regularity of the mixture LRT}\label{sec:nonreg}
+Testing $H_0:\pi_D=\pi_R=0$ vs.\ the mixture is a Hartigan/Davies problem: under
+$H_0$ the effects $\beta_D,\beta_R$ are unidentified and the mixing weights sit on
+the simplex boundary. Consequently $2\Lambda_n$ does \emph{not} converge to a
+$\chi^2$; it behaves like the supremum of a Gaussian process and can drift like
+$\log\log n$ (Hartigan 1985; Chen \& Chen 2001; Liu \& Shao 2003). Two
+consequences: (a) analytic $\chi^2$/BIC calibration of a mixture test is invalid,
+so thresholds must be obtained by simulation under $\mathcal M_{\mathrm{geno}}$
+(including a heteroscedastic null); (b) any Bayes factor is strongly sensitive to
+the prior on $(\beta_D,\beta_R)$---improper priors yield arbitrary-scale,
+meaningless $\mathrm{BF}_{\mathrm{mix:geno}}$. Hence informative, scale-matched
+effect priors and a Dirichlet/spike-and-slab prior on $\pi$ are required, and the
+data override the additive default only once $n\theta^4\gtrsim\lambda_{\text{prior}}$.
+
+\section{Conclusion}
+Coding selection (additive/dominant/recessive; heterogeneous regulation) is a
+\emph{mean-structure} problem, identified at $\Theta(\theta^2)$---this is the
+well-posed core that SuSiE-Mix exploits. The \emph{per-individual mixture
+interpretation} is a higher-moment problem, identified only at
+$\Theta(\theta^4)$--$\Theta(\theta^6)$ relative to a genotypic model, hence
+near-non-identifiable at single loci for GTEx-scale data and confounded with
+ordinary heteroscedasticity. The correct discriminating statistic is
+$\mathrm{BF}_{\mathrm{mix:geno}}$ (or the variance-heterogeneity score test),
+simulation-calibrated against a heteroscedastic genotypic null, with the explicit
+sample-size requirement \eqref{eq:nstar}. Lead empirical claims with
+testable only in large biobank traits or via cross-locus partial pooling.
+
+\end{document}

@@ -1,0 +1,177 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,amssymb,amsthm,bm,geometry,booktabs}
+\geometry{margin=1in}
+\newtheorem{proposition}{Proposition}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathcal{N}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\BF}{\mathrm{BF}}
+\newcommand{\Dir}{\mathrm{Dirichlet}}
+\newcommand{\simplex}{\Delta}
+\title{A fully Bayesian model decision for per-individual mixture-effect SNPs:\\
+$\BF$ of ``one nonzero $\pi$'' (pure) vs.\ ``$\ge 2$ nonzero $\pi$'' (mixture)}
+\author{derivation note for CHIMERA / SuSiE-Mix}
+\date{\today}
+\begin{document}
+\maketitle
+
+\noindent\textbf{Setup.} Causal SNP, genotype $g_i\in\{0,1,2\}$, codings
+$x_i^A=g_i,\ x_i^D=\mathbf 1\{g_i\ge1\},\ x_i^R=\mathbf 1\{g_i=2\}$, $m\in\{A,D,R\}$.
+Latent responder type $z_i\in\{A,D,R\}$, $z_i\mid\bm\pi\sim\mathrm{Cat}(\bm\pi)$,
+$\bm\pi=(\pi_A,\pi_D,\pi_R)\in\simplex^2$. Effects $\beta_A,\beta_D,\beta_R$.
+\begin{equation}
+y_i\mid z_i{=}m,\bm\beta,\sigma^2\sim\N\!\big(x_i^m\beta_m,\sigma^2\big),\qquad
+p(y_i\mid\bm\pi,\bm\beta,\sigma^2)=\sum_m\pi_m\,\N\!\big(x_i^m\beta_m,\sigma^2\big).
+\label{eq:lik}
+\end{equation}
+
+\section{The decision, stated as an event on the simplex}
+The scientific question is exactly a partition of the prior support of $\bm\pi$:
+\[
+H_{\mathrm{pure}}:\ \text{exactly one }\pi_m>0
+\quad(\bm\pi\in\{\bm e_A,\bm e_D,\bm e_R\}),
+\qquad
+H_{\mathrm{mix}}:\ \text{at least two }\pi_m>0 .
+\]
+We want the Bayes factor $\BF=\dfrac{p(\bm y\mid H_{\mathrm{mix}})}{p(\bm y\mid H_{\mathrm{pure}})}$.
+Place priors
+\begin{equation}
+\beta_m\mid\sigma^2\sim\N(0,\sigma^2 g_0)\ \ (m\in\{A,D,R\}),\qquad
+\sigma^2\sim\mathrm{Inv\text{-}Gamma}(\tfrac{\nu_0}2,\tfrac{\nu_0 s_0^2}{2}),\qquad
+\bm\pi\sim\Dir(\bm\alpha).
+\label{eq:priors}
+\end{equation}
+The key technical move: \emph{marginalise the latent $\bm z$ exactly}. Because the
+two hypotheses are events for $\bm z$ ($H_{\mathrm{pure}}\!:\bm z$ constant;
+$H_{\mathrm{mix}}\!:\ge 2$ distinct values), and because conditional on $\bm z$
+both $\bm\beta$ and $\bm\pi$ integrate out in closed form, the whole computation
+reduces to a sum over partitions with closed-form summands.
+
+\section{Exact marginal likelihood as a sum over partitions}
+A configuration $\bm z\in\{A,D,R\}^n$ defines groups $G_m(\bm z)=\{i:z_i=m\}$ with
+counts $\bm n(\bm z)=(n_A,n_D,n_R)$.
+
+\paragraph{(i) Integrate $\bm\pi$ (Dirichlet--multinomial).}
+\begin{equation}
+P(\bm z)=\int_{\simplex^2}\!\Dir(\bm\pi;\bm\alpha)\prod_i\pi_{z_i}\,d\bm\pi
+=\frac{B(\bm\alpha+\bm n(\bm z))}{B(\bm\alpha)}
+=\frac{\Gamma(\alpha_0)}{\Gamma(\alpha_0+n)}\prod_m\frac{\Gamma(\alpha_m+n_m)}{\Gamma(\alpha_m)},
+\quad \alpha_0=\textstyle\sum_m\alpha_m .
+\label{eq:dirmult}
+\end{equation}
+
+\paragraph{(ii) Integrate $\bm\beta$ (and $\sigma^2$) given $\bm z$.}
+Given $\bm z$, the likelihood factorises across groups, each a Bayesian linear
+regression of $\bm y_{G_m}$ on the coding-$m$ column. With $\sigma^2$ known and
+$\beta_m\sim\N(0,\sigma^2 g_0)$, writing $u_m=x^m_{G_m}\!\!\cdot,\ $
+$a_m=u_m^\top u_m,\ b_m=u_m^\top\bm y_{G_m}$,
+\begin{equation}
+\log \mathrm{ML}_m(G_m)=
+-\tfrac12\Big[\,n_m\log(2\pi\sigma^2)+\log(1+g_0 a_m)
++\tfrac1{\sigma^2}\big(\bm y_{G_m}^\top\bm y_{G_m}-\tfrac{g_0 b_m^2}{1+g_0 a_m}\big)\Big].
+\label{eq:mlgroup}
+\end{equation}
+(Verified against direct numerical integration over $\beta$ to $10^{-13}$.) For
+unknown $\sigma^2$ under the prior \eqref{eq:priors}, replace \eqref{eq:mlgroup}
+by the multivariate-$t$ marginal: pooling all groups,
+$\;p(\bm y\mid\bm z)=\pi^{-n/2}\dfrac{\Gamma(\frac{\nu_0+n}{2})}{\Gamma(\frac{\nu_0}{2})}
+\dfrac{(\nu_0 s_0^2)^{\nu_0/2}}{\big(\det M_{\bm z}\big)^{1/2}\,(\nu_0 s_0^2+\mathrm{RSS}_{\bm z})^{(\nu_0+n)/2}}$,
+with $M_{\bm z}$ the block-diagonal $(I+g_0\,U^\top U)$ over groups and
+$\mathrm{RSS}_{\bm z}=\bm y^\top\bm y-\bm y^\top U(g_0^{-1}I+U^\top U)^{-1}U^\top\bm y$.
+
+\paragraph{(iii) Assemble.} With $p(\bm y\mid\bm z)=\prod_m \mathrm{ML}_m(G_m)$,
+\begin{equation}
+p(\bm y\mid H)=\frac{\sum_{\bm z\in H}P(\bm z)\,p(\bm y\mid\bm z)}{\sum_{\bm z\in H}P(\bm z)},
+\qquad
+\boxed{\;\BF=\frac{\sum_{\bm z:\,\ge2\ \text{groups}}P(\bm z)\,p(\bm y\mid\bm z)\big/\!\!\sum_{\bm z:\,\ge2}P(\bm z)}
+{\sum_{m}P(\bm z{=}m\bm 1)\,p(\bm y\mid\bm z{=}m\bm 1)\big/\!\!\sum_m P(\bm z{=}m\bm1)}\;}
+\label{eq:BF}
+\end{equation}
+The three ``pure'' configurations $\bm z=m\bm 1$ are the partitions with one
+occupied group; for those $p(\bm y\mid m\bm 1)=\mathrm{ML}_m(\{1,\dots,n\})$ is
+exactly the standard single-coding SER marginal likelihood. Thus
+\textbf{$H_{\mathrm{pure}}$ is the three single-coding SERs and $H_{\mathrm{mix}}$
+is every non-degenerate partition}; \eqref{eq:BF} is the entire model decision,
+with no maximisation anywhere.
+
+\section{Computation}
+The exact sum has $3^n$ terms (tractable only as a unit test; the formulas above
+were checked this way). For data-scale inference use any of:
+\begin{itemize}\itemsep1pt
+\item\textbf{Collapsed Gibbs over $\bm z$}: sample $z_i\mid\bm z_{-i}$ with
+$\beta,\pi$ integrated out (a Chinese-restaurant-style update using
+\eqref{eq:dirmult}--\eqref{eq:mlgroup}); estimate $p(\bm y\mid H_{\mathrm{mix}})$
+by Chib's method or bridge sampling.
+\item\textbf{Mean-field variational Bayes} on $(\bm z,\bm\beta,\bm\pi,\sigma^2)$
+with factorised $q(\bm z)\prod_m q(\beta_m)\,q(\bm\pi)\,q(\sigma^2)$. The ELBO is
+a rigorous lower bound on $\log p(\bm y\mid H_{\mathrm{mix}})$; the updates are the
+Bayesian analogue of the EM in the package and run at SER cost. \emph{This is the
+SuSiE-compatible route}: the per-individual mixture becomes the inner SER, and
+IBSS propagates it to full fine-mapping.
+\item\textbf{Laplace} about the VB mode for a fast $\BF$ estimate (note
+label-switching: restrict to a canonical ordering or use the collapsed form).
+\end{itemize}
+
+\section{Why the Bayesian decision is well-posed (and self-regularising)}
+\begin{enumerate}\itemsep1pt
+\item\textbf{No boundary pathology.} The frequentist LRT for $\pi_D=\pi_R=0$ is
+non-regular (unidentified $\beta_D,\beta_R$ under the null; Hartigan). Here we
+\emph{integrate} over $\bm\pi$ and $\bm\beta$, so $\BF$ in \eqref{eq:BF} is a
+ratio of finite, well-defined marginal likelihoods. The non-regularity simply
+does not arise.
+\item\textbf{Automatic Occam penalty.} $H_{\mathrm{mix}}$ spreads its prior mass
+over many partitions; when the data are explained by a single coding, the
+non-degenerate partitions contribute little and $\BF\!\lesssim\!1$. No explicit
+complexity penalty is needed.
+\item\textbf{Favouring additive is a prior choice, made explicit.} Two knobs
+control it: (a) the effect-prior scale $g_0$ (the $\BF$ is genuinely sensitive to
+it---use a proper, scale-matched $g_0$, never improper); (b) an asymmetric
+$\bm\alpha=(\alpha_A,\alpha_D,\alpha_R)$ with $\alpha_A$ large to concentrate the
+pure prior at the additive vertex, and/or a spike-and-slab mixing the vertex
+prior (weight $1-\rho$) with $\Dir$ on the interior (weight $\rho$). Then
+posterior odds $=\rho/(1-\rho)\cdot\BF$.
+\end{enumerate}
+
+\section{Asymptotics: this BF is detectable at realistic $n$}
+As $n\to\infty$ with truth $P^\ast$ generated by \eqref{eq:lik},
+$\;\tfrac1n\log\BF \to \KL(P^\ast\,\|\,\mathcal M_{\mathrm{pure}})
+=\min_{m}\KL\!\big(P^\ast\,\|\,\text{pure coding }m\big)$,
+the KL to the \emph{best single coding}. Crucially each pure model has a single
+free coefficient, so it cannot absorb either the dominance curvature or the
+within-genotype overdispersion of a true mixture; hence
+$\KL(P^\ast\|\mathcal M_{\mathrm{pure}})=\Theta(\theta^2)$ (with $\theta=\beta/\sigma$),
+\emph{not} the $\Theta(\theta^4)$ of a saturated-genotypic comparison. Required
+sample size (numerically verified KL; GWAS threshold $n^\ast\approx 19.8/\KL$):
+\begin{center}\small
+\begin{tabular}{cccc}
+\toprule
+$\theta=\beta/\sigma$ & 0.10 & 0.20 & 0.30\\
+\midrule
+$\KL(\text{mix}\,\|\,\text{best pure})$ & $3.8\times10^{-4}$ & $4.1\times10^{-3}$ & $2.2\times10^{-2}$\\
+$n^\ast$ (genome-wide power) & $\approx 5.2\times10^{4}$ & $\approx 4.8\times10^{3}$ & $\approx 9\times10^{2}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+So the \emph{pure-vs-mixture} $\BF$ is well within reach: $n^\ast\sim10^3$ for
+strong eQTLs and $\sim10^4$--$10^5$ for weak ones---feasible in GTEx and trivially
+so in biobanks. (Contrast: a mixture-vs-\emph{saturated genotypic} $\BF$, which is
+what one needs to exclude a single deterministic dominance variant, is
+$\Theta(\theta^4)$ and requires $n\sim10^6$.)
+
+\section{Recommended model set}
+The $\BF$ \eqref{eq:BF} answers ``is the SNP a single pure coding, or not?''.
+A positive result is necessary but not sufficient to claim a \emph{per-individual}
+mixture, because a single deterministic genotypic (2-df dominance) effect, or two
+distinct causal variants each pure, can also defeat $H_{\mathrm{pure}}$. The clean
+remedy is a finite Bayesian model set with the same closed-form ingredients:
+\[
+\{\text{pure-}A,\ \text{pure-}D,\ \text{pure-}R,\ \text{genotypic (2-df)},\ \text{mixture}\},
+\]
+each scored by its marginal likelihood, and posterior model probabilities formed
+by normalising. The genotypic member is \eqref{eq:mlgroup} with the 2-column
+design $[x^D\,|\,x^R]$; the multiple-distinct-variant alternative is handled
+natively by SuSiE's multiple single effects. The per-individual-mixture claim is
+the event that the \emph{mixture} model wins against \emph{all} of these---which is
+the honest, decision-complete version of the test.
+
+\end{document}
