@@ -1,0 +1,410 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+\usepackage{mathtools}
+
+% ---- notation macros -------------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\KL}{\mathrm{KL}}
+\newcommand{\Cat}{\mathrm{Cat}}
+\newcommand{\Nor}{\mathcal{N}}
+\newcommand{\given}{\,\vert\,}
+\newcommand{\sigsq}{\sigma^{2}}
+\newcommand{\sigz}[1]{\sigma_{0#1}^{2}}
+\newcommand{\const}{\mathrm{const}}
+\newcommand{\xim}{x_i^{(m)}}
+\newcommand{\half}{\tfrac{1}{2}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+\theoremstyle{plain}
+\newtheorem{proposition}{Proposition}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+\title{\textbf{The per-individual mixture-of-codings single-effect regression}\\[4pt]
+\large Mean-field variational EM: model, free energy, and update equations}
+\author{William R.\ P.\ Denault}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We derive, from first principles, the mean-field variational EM algorithm
+implemented in \texttt{ser\_pim\_em} (package \texttt{MixSER}). The model is a
+single causal locus at which different individuals may act through different
+genetic coding models (additive, dominant, recessive); a latent per-individual
+assignment selects the coding, each coding carries one shared random effect, and
+a single intercept absorbs the trait baseline. We specify the variational family,
+write the evidence lower bound (ELBO / negative free energy) in closed form, and
+obtain every update --- the responsibilities, the per-coding effect posterior,
+the mixing weights, the intercept, and the empirical-Bayes prior variances --- as
+the exact block-coordinate maximiser of that single objective. Consequently the
+ELBO is non-decreasing at every step. We close with the two reasons the
+implementation uses an intercept rather than mean-centring, a note on
+identifiability at a single locus, and an appendix on the analytic single-coding
+(Level-1) locus Bayes factor that the routine also returns.
+\end{abstract}
+
+% ===========================================================================
+\section{Model and notation}\label{sec:model}
+
+Index individuals by $i=1,\dots,n$ and coding models by $m=1,\dots,M$
+(typically $M=3$: additive, dominant, recessive). For coding $m$, let
+$x^{(m)}=(x_1^{(m)},\dots,x_n^{(m)})^{\!\top}\in\R^{n}$ be the raw genotype
+encoding of the single locus under that model (e.g.\ additive $0/1/2$, dominant
+$\mathbf 1\{g\ge 1\}$, recessive $\mathbf 1\{g=2\}$). Let $y\in\R^{n}$ be the
+response (a partial residual when used inside SuSiE). The residual variance
+$\sigsq$ is fixed externally (the outer IBSS loop updates it).
+
+The generative model introduces a latent coding label $z_i\in\{1,\dots,M\}$ for
+each individual, one shared effect $\beta_m$ per coding, and a shared intercept
+$\alpha$:
+\begin{align}
+  z_i &\sim \Cat(\bm\pi), &&\bm\pi=(\pi_1,\dots,\pi_M),\ \textstyle\sum_m\pi_m=1,
+  \label{eq:gen-z}\\
+  \beta_m &\sim \Nor\!\big(0,\ \sigz{m}\big), &&m=1,\dots,M,
+  \label{eq:gen-beta}\\
+  y_i \given z_i=m,\ \bm\beta &\sim
+      \Nor\!\big(\alpha + \xim\,\beta_m,\ \sigsq\big).
+  \label{eq:gen-y}
+\end{align}
+Thus individual $i$ ``reads'' the locus through its latent coding $z_i$, and all
+individuals sharing coding $m$ share the \emph{same} effect $\beta_m$. The
+unknown parameters are $\bm\theta=(\alpha,\bm\pi,\{\sigz{m}\}_{m})$; the latent
+variables are $\bm z=(z_1,\dots,z_n)$ and $\bm\beta=(\beta_1,\dots,\beta_M)$.
+
+The joint density of observed and latent quantities factorises as
+\begin{equation}\label{eq:joint}
+  p(y,\bm z,\bm\beta\given\bm\theta)
+  =\underbrace{\prod_{m=1}^{M}\Nor\!\big(\beta_m;0,\sigz{m}\big)}_{\text{priors on effects}}
+   \ \prod_{i=1}^{n}\ \pi_{z_i}\,
+     \Nor\!\big(y_i;\,\alpha+x_i^{(z_i)}\beta_{z_i},\,\sigsq\big).
+\end{equation}
+The quantity of interest, the marginal likelihood
+$p(y\given\bm\theta)=\sum_{\bm z}\int p(y,\bm z,\bm\beta\given\bm\theta)\,d\bm\beta$,
+is intractable: it couples the $M^{n}$ assignments with the $M$ continuous
+effects. We therefore lower-bound it variationally.
+
+% ===========================================================================
+\section{Variational family and the free energy}\label{sec:elbo}
+
+\paragraph{Mean-field family.} We approximate the posterior
+$p(\bm z,\bm\beta\given y,\bm\theta)$ by a fully factorised distribution
+\begin{equation}\label{eq:meanfield}
+  q(\bm z,\bm\beta)
+  =\Big(\prod_{i=1}^{n} q(z_i)\Big)\Big(\prod_{m=1}^{M} q(\beta_m)\Big),
+  \qquad
+  q(z_i)=\Cat(\bm r_i),\quad q(\beta_m)=\Nor(\mu_m,\,s_m^{2}).
+\end{equation}
+Here $r_{im}\coloneqq q(z_i=m)\ge 0$ with $\sum_m r_{im}=1$ are the
+\emph{responsibilities}, and $(\mu_m,s_m^{2})$ are the mean and variance of the
+Gaussian belief over the coding-$m$ effect. We deliberately keep $q(\beta_m)$
+Gaussian; \S\ref{sec:qbeta} shows this family is closed under the update, so the
+restriction costs nothing.
+
+\paragraph{ELBO.} For any $q$ the log marginal likelihood admits the
+decomposition $\log p(y\given\bm\theta)=\mathcal L(q,\bm\theta)
++\KL\!\big(q\,\Vert\,p(\cdot\given y,\bm\theta)\big)$, where the evidence lower
+bound (ELBO; the negative variational free energy) is
+\begin{equation}\label{eq:elbo-def}
+  \mathcal L(q,\bm\theta)
+  =\E_{q}\!\big[\log p(y,\bm z,\bm\beta\given\bm\theta)\big]
+   +\mathcal H(q),
+  \qquad
+  \mathcal H(q)=-\E_q[\log q].
+\end{equation}
+Because $\KL\ge 0$, $\mathcal L\le\log p(y\given\bm\theta)$, and maximising
+$\mathcal L$ jointly over $q$ and $\bm\theta$ is the variational EM problem.
+
+\paragraph{Closed form.} Substituting \eqref{eq:joint} and \eqref{eq:meanfield}
+into \eqref{eq:elbo-def} and using $\sum_m r_{im}=1$, the entropy of the
+factorised $q$, and $\E_{q(\beta_m)}[\beta_m]=\mu_m$,
+$\E_{q(\beta_m)}[\beta_m^2]=\mu_m^2+s_m^2$, gives
+\begin{equation}\label{eq:elbo-full}
+\boxed{\;
+  \mathcal L
+  =\sum_{m=1}^{M}\sum_{i=1}^{n} r_{im}\Big(\log\pi_m + \ell_{im}-\log r_{im}\Big)
+   \;-\;\sum_{m=1}^{M}\KL\!\big(\Nor(\mu_m,s_m^2)\,\Vert\,\Nor(0,\sigz{m})\big),
+\;}
+\end{equation}
+where the per-pair expected log-likelihood is
+\begin{equation}\label{eq:ell}
+  \ell_{im}
+  \coloneqq \E_{q(\beta_m)}\!\big[\log\Nor(y_i;\alpha+\xim\beta_m,\sigsq)\big]
+  =-\half\log(2\pi\sigsq)
+   -\frac{1}{2\sigsq}\Big[(y_i-\alpha-\xim\mu_m)^2+(\xim)^2 s_m^2\Big],
+\end{equation}
+and the Gaussian--Gaussian Kullback--Leibler divergence is the standard
+\begin{equation}\label{eq:kl}
+  \KL\!\big(\Nor(\mu_m,s_m^2)\,\Vert\,\Nor(0,\sigz{m})\big)
+  =\half\!\left[\log\frac{\sigz{m}}{s_m^2}
+     +\frac{s_m^2+\mu_m^2}{\sigz{m}}-1\right].
+\end{equation}
+Equations \eqref{eq:elbo-full}--\eqref{eq:kl} are exactly the ELBO accumulated in
+the implementation. The derivation of \eqref{eq:ell} uses only
+$\E[(y_i-\alpha-\xim\beta_m)^2]=(y_i-\alpha-\xim\mu_m)^2+(\xim)^2\,\mathrm{Var}_q(\beta_m)$
+with $\mathrm{Var}_q(\beta_m)=s_m^2$.
+
+The algorithm maximises the \emph{single} objective \eqref{eq:elbo-full} by
+cyclic block-coordinate ascent over the blocks
+$\{q(z_i)\}$, $\{q(\beta_m)\}$, $\bm\pi$, $\alpha$, $\{\sigz{m}\}$. We derive each
+block's maximiser in turn; since every block is solved exactly, $\mathcal L$
+never decreases (\S\ref{sec:monotone}).
+
+% ===========================================================================
+\section{E-step: responsibilities $r_{im}$}\label{sec:estep}
+
+Fix $\bm\theta$ and $\{q(\beta_m)\}$ and maximise $\mathcal L$ over a single
+$q(z_i)$ subject to $\sum_m r_{im}=1$. Only the first sum in
+\eqref{eq:elbo-full} depends on $q(z_i)$:
+\begin{equation}
+  \mathcal L\big(q(z_i)\big)
+  =\sum_{m=1}^{M} r_{im}\big(\log\pi_m+\ell_{im}-\log r_{im}\big)+\const .
+\end{equation}
+Introducing a Lagrange multiplier $\lambda$ for the constraint and setting
+$\partial/\partial r_{im}=0$,
+\begin{equation}
+  \log\pi_m+\ell_{im}-\log r_{im}-1-\lambda=0
+  \quad\Longrightarrow\quad
+  r_{im}\propto \pi_m\,e^{\ell_{im}} .
+\end{equation}
+This is the generic mean-field fixed point
+$q^\star(z_i)\propto\exp\E_{q(\bm\beta)}[\log p(y,\bm z,\bm\beta)]$. Dropping the
+constant $-\half\log(2\pi\sigsq)$ from \eqref{eq:ell} (it cancels in the
+normalisation) yields the implemented form
+\begin{equation}\label{eq:rstep}
+\boxed{\;
+  r_{im}
+  =\frac{\pi_m\,\exp(\eta_{im})}{\sum_{k=1}^{M}\pi_k\,\exp(\eta_{ik})},
+  \qquad
+  \eta_{im}=-\frac{1}{2\sigsq}\Big[(y_i-\alpha-\xim\mu_m)^2+(\xim)^2 s_m^2\Big].
+\;}
+\end{equation}
+The effect is integrated against its \emph{current} belief $q(\beta_m)$: the
+score $\eta_{im}$ compares individual $i$'s observation to the fitted value
+$\alpha+\xim\mu_m$ (never to $0$), penalised by the predictive uncertainty
+$(\xim)^2 s_m^2$. Individuals are thus assigned to codings by fit quality, with a
+built-in Occam penalty for uncertain effects.
+
+\begin{remark}[Reference genotype is uninformative]\label{rmk:g0}
+For an individual with $g_i=0$ every coding gives $\xim=0$, so
+$\eta_{im}=-(y_i-\alpha)^2/(2\sigsq)$ is the \emph{same} for all $m$ and
+$r_{im}=\pi_m$. Such individuals carry no coding information and correctly revert
+to the prior. This is exactly why the baseline must enter as the intercept
+$\alpha$ and not by mean-centring $y$ (\S\ref{sec:intercept}).
+\end{remark}
+
+% ===========================================================================
+\section{M-step I: per-coding effect posterior $q(\beta_m)$}\label{sec:qbeta}
+
+Fix $\{r_{im}\}$ and $\bm\theta$ and optimise over $q(\beta_m)$. The generic
+mean-field optimum is
+$\log q^\star(\beta_m)=\E_{q(\bm z)}\big[\log p(y,\bm z,\bm\beta)\big]+\const$,
+where the expectation is over everything except $\beta_m$. Collecting the
+$\beta_m$-dependent terms of \eqref{eq:joint},
+\begin{equation}\label{eq:logqbeta}
+  \log q^\star(\beta_m)
+  =-\frac{1}{2\sigsq}\sum_{i=1}^{n} r_{im}\big(y_i-\alpha-\xim\beta_m\big)^2
+   -\frac{\beta_m^2}{2\,\sigz{m}}+\const .
+\end{equation}
+This is quadratic in $\beta_m$, so $q^\star(\beta_m)$ is Gaussian (the family is
+closed). Matching the coefficients of $\beta_m^2$ and $\beta_m$ gives the
+precision and mean:
+\begin{align}
+  \frac{1}{s_m^2}
+  &=\frac{1}{\sigz{m}}+\frac{1}{\sigsq}\sum_{i=1}^{n} r_{im}\,(\xim)^2,
+  \label{eq:s2step}\\[4pt]
+  \mu_m
+  &=\frac{s_m^2}{\sigsq}\sum_{i=1}^{n} r_{im}\,\xim\,(y_i-\alpha).
+  \label{eq:mustep}
+\end{align}
+Writing $S_m\coloneqq\sum_i r_{im}(\xim)^2$, these are the boxed updates
+\begin{equation}
+\boxed{\;
+  s_m^2=\Big(\tfrac{1}{\sigz{m}}+\tfrac{S_m}{\sigsq}\Big)^{\!-1},
+  \qquad
+  \mu_m=\frac{s_m^2}{\sigsq}\sum_{i=1}^{n} r_{im}\,\xim\,(y_i-\alpha).
+\;}
+\end{equation}
+This is precisely a responsibility-weighted Bayesian single-effect regression of
+$y-\alpha$ on coding $m$: each individual contributes with weight $r_{im}$, and
+the prior $\Nor(0,\sigz{m})$ shrinks the estimate.
+
+% ===========================================================================
+\section{M-step II: hyperparameters}\label{sec:hyper}
+
+\subsection{Mixing weights $\bm\pi$}
+Only $\sum_{m}\big(\sum_i r_{im}\big)\log\pi_m$ in \eqref{eq:elbo-full} depends on
+$\bm\pi$. Maximising under $\sum_m\pi_m=1$ with a Lagrange multiplier gives the
+ordinary EM weight update
+\begin{equation}\label{eq:pistep}
+\boxed{\;
+  \pi_m=\frac{1}{n}\sum_{i=1}^{n} r_{im}.
+\;}
+\end{equation}
+No \texttt{mixsqp} / empirical-Bayes step is applied to the per-individual
+responsibilities; doing so collapses the weights onto the single sparsest coding
+(see \S\ref{sec:intercept}).
+
+\subsection{Intercept $\alpha$}
+Differentiating \eqref{eq:elbo-full} through \eqref{eq:ell},
+\begin{equation}
+  \frac{\partial\mathcal L}{\partial\alpha}
+  =\frac{1}{\sigsq}\sum_{i=1}^{n}\sum_{m=1}^{M} r_{im}\big(y_i-\alpha-\xim\mu_m\big)=0 .
+\end{equation}
+Using $\sum_m r_{im}=1$ and solving,
+\begin{equation}\label{eq:alphastep}
+\boxed{\;
+  \alpha=\frac{1}{n}\sum_{i=1}^{n}\Big(y_i-\sum_{m=1}^{M} r_{im}\,\xim\,\mu_m\Big).
+\;}
+\end{equation}
+The intercept is the mean residual after removing the responsibility-averaged
+mixed effect.
+
+\subsection{Empirical-Bayes prior variances $\sigz{m}$}
+The only $\sigz{m}$-dependent part of \eqref{eq:elbo-full} is
+$-\KL(\Nor(\mu_m,s_m^2)\Vert\Nor(0,\sigz{m}))$. Holding $q(\beta_m)$ fixed and
+writing $v\coloneqq\sigz{m}$,
+\begin{equation}
+  \frac{\partial}{\partial v}\Big[-\half\log v-\frac{s_m^2+\mu_m^2}{2v}\Big]
+  =-\frac{1}{2v}+\frac{s_m^2+\mu_m^2}{2v^2}=0
+  \;\Longrightarrow\;
+  v=s_m^2+\mu_m^2 .
+\end{equation}
+Hence the ELBO-maximising empirical-Bayes update is the second moment of the
+effect belief,
+\begin{equation}\label{eq:ebstep}
+\boxed{\;
+  \sigz{m}=\mu_m^2+s_m^2=\E_{q(\beta_m)}[\beta_m^2]
+\;}
+\end{equation}
+(applied when \texttt{estimate\_prior\_variance=TRUE}; a floor $10^{-8}$ keeps it
+positive). Equations \eqref{eq:s2step} and \eqref{eq:ebstep} are coupled across
+iterations but each is the exact maximiser of its own block, which is all
+coordinate ascent requires.
+
+% ===========================================================================
+\section{Monotonicity, the algorithm, and convergence}\label{sec:monotone}
+
+\begin{proposition}[Monotone ELBO]
+Each update \eqref{eq:rstep}, \eqref{eq:s2step}--\eqref{eq:mustep},
+\eqref{eq:pistep}, \eqref{eq:alphastep}, \eqref{eq:ebstep} is the exact global
+maximiser of the single objective $\mathcal L$ in \eqref{eq:elbo-full} over its
+block, holding the others fixed. Therefore the sequence of ELBO values produced
+by cyclic application is non-decreasing,
+$\mathcal L^{(t+1)}\ge\mathcal L^{(t)}$, and, being bounded above by
+$\log p(y\given\bm\theta)$, it converges.
+\end{proposition}
+\begin{proof}
+Block-coordinate ascent on a function with exact block maximisers is monotone:
+replacing one block by its argmax cannot decrease the objective, and the other
+blocks are unchanged. The $q(z_i)$ and $q(\beta_m)$ steps are the mean-field
+optima (\S\ref{sec:estep},\S\ref{sec:qbeta}); the $\bm\pi$, $\alpha$, $\sigz{m}$
+steps are the stationary points of concave one-block subproblems
+(\S\ref{sec:hyper}). The bound $\mathcal L\le\log p(y\given\bm\theta)$ follows
+from $\KL\ge 0$. A monotone sequence bounded above converges.
+\end{proof}
+
+\paragraph{Algorithm (one sweep).} Given $\sigsq$, repeat to convergence of
+$\mathcal L$:
+\begin{enumerate}\itemsep2pt
+  \item \textbf{E-step:} update all $r_{im}$ by \eqref{eq:rstep};
+  \item \textbf{weights:} $\pi_m\leftarrow\frac1n\sum_i r_{im}$
+        \eqref{eq:pistep};
+  \item \textbf{intercept:} $\alpha$ by \eqref{eq:alphastep};
+  \item \textbf{effect:} $s_m^2,\mu_m$ by \eqref{eq:s2step}--\eqref{eq:mustep};
+  \item \textbf{EB prior:} $\sigz{m}\leftarrow\mu_m^2+s_m^2$ \eqref{eq:ebstep}.
+\end{enumerate}
+Initialise $\bm\pi$ uniform, $\alpha=\bar y$, and each $\mu_m$ at the single-coding
+OLS slope of $y-\alpha$ on $x^{(m)}$ with $s_m^2=\sigsq/\|x^{(m)}\|^2$. Because
+the per-individual mixture is only weakly identified at one locus
+(\S\ref{sec:intercept}), the routine runs \texttt{n\_start} restarts --- the
+first uniform, the rest $\mathrm{Dirichlet}(\mathbf 1)$ draws of $\bm\pi$ --- and
+returns the fit of highest ELBO.
+
+\paragraph{Variational marginal likelihood.} A convenient by-product evaluated
+during the E-step is
+\begin{equation}\label{eq:loglik}
+  \widetilde{\ell}(y)
+  =\sum_{i=1}^{n}\log\sum_{m=1}^{M}\pi_m\,e^{\ell_{im}},
+\end{equation}
+the log of the (effect-integrated) per-individual mixture likelihood at the
+current beliefs; it is reported as \texttt{loglik}.
+
+% ===========================================================================
+\section{Why an intercept, not mean-centring; identifiability}
+\label{sec:intercept}
+
+\paragraph{Intercept vs.\ centring.} By Remark~\ref{rmk:g0}, raw $0/1/2$ codings
+make the reference genotype ($g_i=0$) predict $\alpha$ under every coding, so such
+individuals are uninformative ($r_{im}=\pi_m$). If instead one mean-centres $y$
+and drops $\alpha$, the $g=0$ group sits at $y\approx-\bar y$ while the model
+predicts $0$ there; every component must then bend to absorb the baseline, and
+the optimiser collapses onto whichever coding can do so most cheaply --- the
+spurious ``recessive collapse''. The shared intercept \eqref{eq:alphastep}
+removes the baseline without this distortion and is invariant to the trait mean.
+
+\paragraph{Weights by EM, not \texttt{mixsqp}.} Treating the columns
+$\{r_{\cdot m}\}$ as data for an empirical-Bayes mixing solver
+(\texttt{mixsqp}) maximises a different objective that rewards sparsity in
+$\bm\pi$ and again collapses to one coding. The plain EM update
+\eqref{eq:pistep} is the correct M-step for \eqref{eq:elbo-full}.
+
+\paragraph{Identifiability at one locus.} The dominant coding
+$\mathbf 1\{g\ge1\}$ equals the additive coding except at $g=2$, and the
+recessive coding $\mathbf 1\{g=2\}$ is informative only at $g=2$; the
+contrasts that separate codings live entirely in the $g\ge 1$ stratum, and
+$g=0$ individuals are uninformative. A single locus therefore identifies the
+per-individual mixture only weakly, and a residual dominant component can
+persist. The restarts guard the optimisation, but \emph{calibrated} weights
+$\bm\pi$ require pooling the responsibilities across many loci; at one locus the
+quantity to trust for a decision is the analytic Level-1 Bayes factor of
+Appendix~\ref{app:bf}, not $\bm\pi$ itself.
+
+% ===========================================================================
+\appendix
+\section{Analytic single-coding (Level-1) locus Bayes factor}\label{app:bf}
+
+Independently of the per-individual mixture, \texttt{ser\_pim\_em} also returns
+the closed-form Bayes factor of ``some coding has a non-zero effect'' versus
+``all effects are zero''. For each coding $m$ let $\tilde x^{(m)}$ be the
+centred-and-scaled $x^{(m)}$ and $\tilde y=y-\bar y$. The exact single-effect
+Bayes factor of Wang et al.\ (2020) for coding $m$ at prior variance $V$ is
+\begin{equation}\label{eq:bf1}
+  \log\mathrm{BF}_m(V)
+  =\half\log\frac{\hat s_m^2}{V+\hat s_m^2}
+   +\frac{\hat\beta_m^2}{2}\Big(\frac{1}{\hat s_m^2}-\frac{1}{V+\hat s_m^2}\Big),
+  \quad
+  \hat\beta_m=\frac{\tilde x^{(m)\top}\tilde y}{\|\tilde x^{(m)}\|^2},
+  \quad
+  \hat s_m^2=\frac{\sigsq}{\|\tilde x^{(m)}\|^2}.
+\end{equation}
+Each $V_m$ is set by maximum marginal likelihood,
+$V_m=\argmax_{V\ge 0}\log\mathrm{BF}_m(V)$ (with the off-switch $V_m=0$, i.e.\
+$\log\mathrm{BF}_m=0$, whenever the optimum is negative). With coding weights
+$w_m$ (uniform $1/M$ by default) the locus Bayes factor of any-coding-effect vs.\
+null is the weighted average
+\begin{equation}\label{eq:bfsnp}
+  \log\mathrm{BF}_{\mathrm{locus}}
+  =\log\sum_{m=1}^{M} w_m\,\mathrm{BF}_m(V_m)
+  =\operatorname*{logsumexp}_{m}\!\big(\log w_m+\log\mathrm{BF}_m(V_m)\big),
+\end{equation}
+returned as \texttt{lbf\_snp}/\texttt{bf\_snp}. This is the object the SuSiE /
+SuSiE~2.0 IBSS loop consumes as the single-effect log-Bayes-factor for this
+locus; the per-individual mixture's exact Bayes factor would require the
+intractable $M^{n}$ sum, so for decisions the analytic \eqref{eq:bfsnp} is used.
+As a conservative cross-check the routine also reports the variational lower
+bound $\log\mathrm{BF}_{\mathrm{pim}}=\mathcal L-\ell_0$, where
+$\ell_0=\sum_i\log\Nor(y_i;\bar y,\sigsq)$ is the intercept-only null
+log-likelihood.
+
+\paragraph{Reference.}
+G.\ Wang, A.\ Sarkar, P.\ Carbonetto \& M.\ Stephens (2020).
+\textit{A simple new approach to variable selection in regression, with
+application to genetic fine mapping.} JRSS-B 82(5), 1273--1300.
+
+\end{document}
