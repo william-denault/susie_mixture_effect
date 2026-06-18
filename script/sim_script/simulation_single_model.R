@@ -45,6 +45,7 @@ generate_data= function (n,
   }
 
   return(list(y=y,
+              y_true=y_true,
               z=z,
               rc= rc,
               beta=beta,
@@ -94,7 +95,7 @@ for ( k in 1:3){
 
 susie_res= susie_res <- susieR::susie(
   X = matrix(as.double(dat$rc$additive), ncol = 1),
-  y = dat$y
+  y = dat$y,  residual_variance = .25^2
 )
 
 

@@ -83,7 +83,7 @@ for ( o in 1: n_sim ){
 
     susie_res= susie_res <- susieR::susie(
       X = matrix(as.double(dat$rc$additive), ncol = 1),
-      y = dat$y
+      y = dat$y, residual_variance = .25^2
     )
 
 
