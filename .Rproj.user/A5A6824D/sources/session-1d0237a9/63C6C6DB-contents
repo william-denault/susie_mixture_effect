@@ -22,16 +22,33 @@ true_ind=  do.call(c,
 
 
 rmse_res=  do.call(rbind,
-                   lapply(1: length(res), function(k)  data.frame(rmse= c(res[[k]]$rmse_sample,
-                                                                          res[[k]]$rmse_mix,
-                                                                          res[[k]]$rmse_susie),
-                                                                  type=c("in sample",
-                                                                         "mix SER",
-                                                                         "SER")
-                   )
+                   lapply(1: length(res), function(k)  {
+
+
+                     if (res[[k]]$dat$mixture_prop[1]== 1){
+                       reg_type="additive"
+                     }
+                     if (res[[k]]$dat$mixture_prop[2]== 1){
+                       reg_type="dominant"
+                     }
+                     if (res[[k]]$dat$mixture_prop[3]== 1){
+                       reg_type="recessive"
+                     }
+
+                     data.frame(rmse= c(res[[k]]$rmse_sample,
+                                        res[[k]]$rmse_mix,
+                                        res[[k]]$rmse_susie),
+                                type=c("in sample",
+                                       "mix SER",
+                                       "SER"),
+                                reg_type= rep(reg_type,3)
+                     )
+                   }
+
+
                    ))
 
-ggplot(rmse_res, aes(y =rmse, x=type))+geom_boxplot()
+ggplot(rmse_res, aes(y =rmse, x=type, colour = reg_type))+geom_boxplot()
 
 true_ind_mat=0*ind_est
 true_ind_mat[which(true_ind=="A"),1]=1

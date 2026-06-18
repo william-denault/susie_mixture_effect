@@ -26,11 +26,18 @@ rmse_res=  do.call(rbind,
                                                                           res[[k]]$rmse_susie),
                                                                   type=c("in sample",
                                                                          "mix SER",
-                                                                         "SER")
+                                                                         "SER"),
+                                                                  reg_type= rep(res[[k]]$dat$mixture_prop[1],3)
                    )
                    ))
 
 ggplot(rmse_res, aes(y =rmse, x=type))+geom_boxplot()
+ggplot(rmse_res, aes(y =rmse,x = reg_type,
+                     color = type,
+                     shape=type))+geom_point()+
+  xlab("proportion of additive individual")
+
+
 
 true_ind_mat=0*ind_est
 true_ind_mat[which(true_ind=="A"),1]=1

@@ -2,7 +2,7 @@
 
 library(MixSER)
 #simulation per scenario
-n_sim =100
+n_sim =1000
 n=100
 MAF=  .3
 sds=.25
