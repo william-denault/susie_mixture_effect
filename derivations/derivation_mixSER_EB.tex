@@ -1,0 +1,367 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{bm}
+\usepackage{mathtools}
+
+% ---- notation macros (kept close to fSuSiE / SuSiE) ------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\mathrm{Var}}
+\newcommand{\Cat}{\mathrm{Categorical}}
+\newcommand{\Mult}{\mathrm{Mult}}
+\newcommand{\Nor}{\mathcal{N}}
+\newcommand{\given}{\,\vert\,}
+\newcommand{\sigsq}{\sigma^{2}}
+\newcommand{\sigz}[1]{\sigma_{0#1}^{2}}
+\newcommand{\BF}{\mathrm{BF}}
+\newcommand{\ML}{\mathrm{ML}}
+\newcommand{\PIP}{\mathrm{PIP}}
+\newcommand{\half}{\tfrac{1}{2}}
+\newcommand{\xjm}{x_j^{(m)}}
+\newcommand{\const}{\mathrm{const}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\logsumexp}{logsumexp}
+\DeclareMathOperator*{\softmax}{softmax}
+
+\theoremstyle{plain}
+\newtheorem{proposition}{Proposition}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+\title{\textbf{The mixture-of-codings single-effect regression}\\[4pt]
+\large An empirical-Bayes formulation in the style of fSuSiE:\\
+marginal likelihoods, Bayes factors, and posterior summaries}
+\author{William R.\ P.\ Denault}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We give a self-contained, exact empirical-Bayes (EB) derivation of the
+\emph{mixture-of-codings} single-effect regression (\emph{mixSER}), the
+single-effect module consumed by the SuSiE / SuSiE~2.0 iterative
+Bayesian stepwise selection (IBSS) loop. The model is the single-effect
+regression (SER) of Wang et al.\ (2020) in which the one causal variant acts
+through a \emph{coding model} drawn from a finite mixture (additive, dominant,
+recessive). We deliberately follow the classical Stephens-lab EB style used by
+\texttt{ash}, SuSiE, and fSuSiE: every quantity is a marginal likelihood, a
+Bayes factor, a posterior inclusion probability, or a posterior moment, all in
+closed form. There is no variational family and no evidence lower bound (no
+``free energy''). Attaching the coding mixture to the \emph{variant} rather than
+to each \emph{individual} keeps the marginal likelihood a finite $M$-term sum
+and is exactly what makes the EB treatment exact; the per-individual
+latent-coding variant, by contrast, has an $M^{n}$ marginal likelihood and is
+the only place a variational bound would be required (\S\ref{sec:noelbo}). We
+derive the single-coding Bayes factor, the coding-mixture Bayes factor, the
+variant-level posterior (PIP) and coding posterior, the EB updates of the prior
+variances and mixing weights, and the interface to SuSiE~2.0; the routine
+reduces exactly to the standard SER when $M=1$.
+\end{abstract}
+
+% ===========================================================================
+\section{Model and notation}\label{sec:model}
+
+We mirror the notation of the functional single-effect regression (SFR) model
+of fSuSiE. Index individuals by $i=1,\dots,n$, candidate variants by
+$j=1,\dots,J$, and coding models by $m=1,\dots,M$ (typically $M=3$: additive,
+dominant, recessive). For variant $j$ under coding $m$ let
+$x_j^{(m)}=(x_{1j}^{(m)},\dots,x_{nj}^{(m)})^{\!\top}\in\R^{n}$ be the genotype
+encoding of that variant under that coding (additive $g\in\{0,1,2\}$, dominant
+$\mathbf 1\{g\ge 1\}$, recessive $\mathbf 1\{g=2\}$). Let $y\in\R^{n}$ be the
+response; inside SuSiE this is the partial residual for the single effect being
+updated. The residual variance $\sigsq$ is fixed externally and updated by the
+outer IBSS loop.
+
+\paragraph{Covariates, centring, scaling.} As in fSuSiE we first project out an
+intercept and any nuisance covariates $Z$ (sex, age, PCs) from both $y$ and each
+coding vector, $x_j^{(m)}\leftarrow x_j^{(m)}-Z(Z^{\!\top}Z)^{-1}Z^{\!\top}x_j^{(m)}$
+and likewise for $y$, and then centre and scale each $x_j^{(m)}$ to unit sample
+variance. After this reduction the working response and designs are centred, so
+no intercept term appears below; this is the standard reduction used for
+univariate regression and is the same one used throughout SuSiE and fSuSiE.
+
+\paragraph{The single-effect regression with a coding mixture.} The SER assumes
+exactly one variant carries a nonzero effect. We encode this with a one-hot
+selection vector $\bm\gamma=(\gamma_1,\dots,\gamma_J)$ and, for the selected
+variant, a coding label $c\in\{1,\dots,M\}$:
+\begin{align}
+  \bm\gamma &\sim \Mult(1,\bm p), && \bm p=(p_1,\dots,p_J),\ \textstyle\sum_j p_j=1,
+    \label{eq:gen-gamma}\\
+  c \given \gamma_j=1 &\sim \Cat(\bm\pi), && \bm\pi=(\pi_1,\dots,\pi_M),\
+    \textstyle\sum_m\pi_m=1, \label{eq:gen-c}\\
+  \beta \given c=m &\sim \Nor\!\big(0,\ \sigz{m}\big), \label{eq:gen-beta}\\
+  y \given \gamma_j=1,\ c=m,\ \beta &\sim
+    \Nor\!\big(\xjm\,\beta,\ \sigsq I_n\big). \label{eq:gen-y}
+\end{align}
+Thus the prior on the causal variant's effect ``channel'' is the finite mixture
+\begin{equation}\label{eq:gprior}
+  g(\,\cdot\,;\,\text{variant }j)=\sum_{m=1}^{M}\pi_m\,
+     \Nor\!\big(0,\sigz{m}\big)\ \text{acting through the coding-}m\ \text{design }\xjm,
+\end{equation}
+the direct analogue of the fSuSiE scale-mixture prior
+$g_{sl}=\sum_{k}\pi_k\,\Nor(0,\sigma_k^2)$: the components are indexed by coding
+rather than by a variance grid, and each component additionally swaps the design
+vector. A coding with $\sigz{m}=0$ is a point mass at zero and plays the role of
+the \texttt{ash} null component. The unknown hyperparameters are $\bm p$ (variant
+prior, usually uniform $1/J$), the mixing weights $\bm\pi$, and the prior
+variances $\{\sigz{m}\}$.
+
+\paragraph{Marginal likelihood of the SER.} Because $\bm\gamma$ is one-hot and
+$\beta$ is Gaussian, the marginal likelihood is a finite sum of one-dimensional
+Gaussian integrals,
+\begin{equation}\label{eq:ml-ser}
+  p(y\given\bm p,\bm\pi,\{\sigz{m}\},\sigsq)
+  =\sum_{j=1}^{J} p_j \sum_{m=1}^{M}\pi_m
+   \underbrace{\int \Nor\!\big(y;\xjm\beta,\sigsq I_n\big)\,
+                    \Nor\!\big(\beta;0,\sigz{m}\big)\,d\beta}_{\displaystyle =:\ \ML_{jm}(\sigz{m})}.
+\end{equation}
+Let $\ML_0:=\Nor(y;0,\sigsq I_n)$ be the null marginal likelihood (no effect).
+Every object the routine returns is built from the single-coding marginal
+likelihoods $\ML_{jm}$ and their ratios to $\ML_0$.
+
+% ===========================================================================
+\section{Single-coding marginal likelihood and Bayes factor}\label{sec:onecoding}
+
+Fix a variant $j$ and a coding $m$ and write $x:=\xjm$ for the (centred, scaled)
+design and $V:=\sigz{m}$. The summary statistics are the usual single-effect
+ordinary-least-squares estimate and its variance,
+\begin{equation}\label{eq:ols}
+  \hat\beta=\frac{x^{\!\top}y}{x^{\!\top}x},
+  \qquad
+  \hat s^{2}=\frac{\sigsq}{x^{\!\top}x},
+\end{equation}
+so $\hat\beta\given\beta\sim\Nor(\beta,\hat s^{2})$ is an exact one-dimensional
+summary of the data for this effect. Completing the square in the Gaussian
+integral (Appendix~\ref{app:gauss}) gives the exact single-effect Bayes factor of
+Wang et al.\ (2020) against the null $\beta=0$,
+\begin{equation}\label{eq:bf}
+\boxed{\;
+  \log\BF_{jm}(V)
+  =\log\frac{\ML_{jm}(V)}{\ML_0}
+  =\half\log\frac{\hat s^{2}}{V+\hat s^{2}}
+   +\frac{\hat\beta^{2}}{2}\Big(\frac{1}{\hat s^{2}}-\frac{1}{V+\hat s^{2}}\Big),
+\;}
+\end{equation}
+with the convention $\log\BF_{jm}(0)=0$. The posterior of the effect under this
+single coding is Gaussian, $\beta\given(\gamma_j=1,c=m,y)\sim\Nor(\mu_{jm},s_{jm}^{2})$,
+with
+\begin{equation}\label{eq:postmoments}
+  s_{jm}^{2}=\Big(\frac{1}{V}+\frac{x^{\!\top}x}{\sigsq}\Big)^{-1}
+           =\Big(\frac1V+\frac1{\hat s^2}\Big)^{-1},
+  \qquad
+  \mu_{jm}=\frac{s_{jm}^{2}}{\sigsq}\,x^{\!\top}y
+          =s_{jm}^{2}\,\frac{\hat\beta}{\hat s^{2}}.
+\end{equation}
+Equations \eqref{eq:bf}--\eqref{eq:postmoments} are the additive SER building
+block: they are computed once per coding and reused everywhere below.
+
+% ===========================================================================
+\section{Coding-mixture Bayes factor and the variant Bayes factor}\label{sec:mixbf}
+
+Integrating \eqref{eq:gen-c}--\eqref{eq:gen-beta} over the coding label collapses
+the $M$ single-coding marginal likelihoods into one variant-level Bayes factor,
+\begin{equation}\label{eq:bf-variant}
+\boxed{\;
+  \BF_j
+  =\frac{p(y\given\gamma_j=1)}{\ML_0}
+  =\sum_{m=1}^{M}\pi_m\,\BF_{jm}(\sigz{m}),
+  \qquad
+  \log\BF_j=\logsumexp_{m}\!\big(\log\pi_m+\log\BF_{jm}\big).
+\;}
+\end{equation}
+This is the exact mixture-of-codings Bayes factor: a $\bm\pi$-weighted average of
+the per-coding Bayes factors, evaluated stably by the log-sum-exp identity. It is
+the single number the IBSS loop needs from the effect, and it specialises to the
+ordinary SER log-Bayes-factor when $M=1$.
+
+% ===========================================================================
+\section{Posterior summaries}\label{sec:posterior}
+
+Two posterior layers follow from Bayes' rule applied to
+\eqref{eq:gen-gamma}--\eqref{eq:gen-y}; both are exact.
+
+\paragraph{Variant posterior (PIP / $\bm\alpha$).} The posterior probability that
+variant $j$ is the causal one is the SuSiE $\alpha$ vector, equivalently the
+fSuSiE posterior inclusion probability,
+\begin{equation}\label{eq:pip}
+\boxed{\;
+  \alpha_j:=\Pr(\gamma_j=1\given y)
+  =\frac{p_j\,\BF_j}{\sum_{j'=1}^{J}p_{j'}\,\BF_{j'}}
+  =\softmax_j\!\big(\log p_j+\log\BF_j\big).
+\;}
+\end{equation}
+
+\paragraph{Coding posterior (responsibilities).} Given that variant $j$ is
+causal, the posterior over which coding it acts through is the \texttt{ash}-style
+posterior mixture weight
+\begin{equation}\label{eq:w}
+\boxed{\;
+  w_{jm}:=\Pr(c=m\given\gamma_j=1,y)
+  =\frac{\pi_m\,\BF_{jm}}{\sum_{k=1}^{M}\pi_k\,\BF_{jk}}
+  =\softmax_m\!\big(\log\pi_m+\log\BF_{jm}\big).
+\;}
+\end{equation}
+These are the responsibilities, but obtained here in one shot by Bayes' rule at
+the variant level rather than by iterating a per-individual assignment; they are
+posterior weights on coding models, not on individuals.
+
+\paragraph{Effect posterior and fitted values.} The full posterior of the effect
+is the two-level mixture: variant $j$ with probability $\alpha_j$, then coding $m$
+with probability $w_{jm}$, then $\Nor(\mu_{jm},s_{jm}^{2})$. The posterior-mean
+contribution of the single effect to the fitted response is
+\begin{equation}\label{eq:fitted}
+  \widehat{y}
+  =\sum_{j=1}^{J}\alpha_j\sum_{m=1}^{M}w_{jm}\,\mu_{jm}\,\xjm,
+\end{equation}
+and, because the design depends on the coding, the SuSiE bookkeeping carries the
+coding-resolved first and second moments
+\begin{equation}\label{eq:moments}
+  \E[\beta\given\gamma_j=1,y]=\sum_{m}w_{jm}\,\mu_{jm},
+  \qquad
+  \E[\beta^{2}\given\gamma_j=1,y]=\sum_{m}w_{jm}\big(\mu_{jm}^{2}+s_{jm}^{2}\big),
+\end{equation}
+together with the per-coding pair $(\mu_{jm},s_{jm}^{2})$ and the design $\xjm$
+needed to form the expected residual sum of squares in the outer loop. A pointwise
+$1-\rho$ credible interval for the effect under variant $j$ is read off the
+mixture \eqref{eq:moments} exactly as in \texttt{ash}.
+
+% ===========================================================================
+\section{Empirical-Bayes estimation of the hyperparameters}\label{sec:eb}
+
+Here the classical EB treatment replaces the variational M-steps: each
+hyperparameter is set by maximising a marginal likelihood, never an evidence
+lower bound.
+
+\subsection{Per-coding prior variances $\sigz{m}$}
+Each $\sigz{m}$ is estimated by maximising its own single-coding marginal
+likelihood --- equivalently, by maximising the per-coding Bayes factor
+\eqref{eq:bf} over the prior variance,
+\begin{equation}\label{eq:ebv}
+\boxed{\;
+  \widehat{\sigz{m}}=\argmax_{V\ge 0}\ \log\BF_{jm}(V),
+  \qquad \widehat{\sigz{m}}=0\ \text{ if }\ \max_{V}\log\BF_{jm}(V)\le 0\ \text{(off-switch)}.
+\;}
+\end{equation}
+This is a smooth one-dimensional problem (solved by Brent's method) whose
+objective uses all $n$ individuals, so $\sigz{m}$ is well identified. It is
+exactly the \texttt{estimate\_prior\_variance} / EBNM step of SuSiE applied
+coding by coding, and the off-switch is the \texttt{ash} null component: a coding
+whose maximum-marginal-likelihood prior variance is zero is shrunk to the point
+mass and contributes $\BF_{jm}=1$ to \eqref{eq:bf-variant}.
+
+\subsection{Coding-mixture weights $\bm\pi$}\label{sec:pi}
+The weights $\bm\pi$ are a shared, locus/architecture-level hyperparameter, and
+this is the one place where the level of EB pooling matters. As a function of
+$\bm\pi$ \emph{at a single locus}, the relevant log marginal likelihood is
+$\log\sum_m\pi_m\,\BF_{m}$, which is concave but maximised at a \emph{vertex} of
+the simplex --- the single coding with the largest $\BF_m$. Point-estimating
+$\bm\pi$ from one locus (e.g.\ running \texttt{mixsqp} on a single locus's coding
+Bayes factors) therefore collapses all mass onto the sparsest coding; this is the
+spurious ``recessive collapse'' pathology. The marginal likelihood identifies
+$\bm\pi$ only when many independent loci share it. The correct EB estimate pools
+the locus-level coding-Bayes-factor vectors $\BF_{\ell\cdot}=(\BF_{\ell 1},\dots,\BF_{\ell M})$
+across loci $\ell=1,\dots,L$,
+\begin{equation}\label{eq:ebpi}
+\boxed{\;
+  \widehat{\bm\pi}
+  =\argmax_{\bm\pi\in\Delta_{M}}\ \sum_{\ell=1}^{L}\log\sum_{m=1}^{M}\pi_m\,\BF_{\ell m},
+\;}
+\end{equation}
+which is the standard \texttt{ash}/\texttt{mixsqp} mixture-weight problem
+(concave in $\bm\pi$, interior optimum) and yields the empirical-Bayes prior
+shared by all loci. Within any single SER call, $\bm\pi$ is held fixed at this
+pooled estimate, or at the uniform default $\pi_m=1/M$. This places
+\texttt{mixsqp} at the level where it is well posed --- across loci, where there
+are $L$ independent observations --- rather than within a locus, where it is
+degenerate. The picture is identical to fSuSiE: there \texttt{ash} pools the $T$
+wavelet coefficients of a single effect to estimate $\bm\pi$; here a single locus
+supplies only $M$ coding Bayes factors, so the pooling must be across loci.
+
+% ===========================================================================
+\section{mixSER as a SuSiE 2.0 single-effect module}\label{sec:susie}
+
+Given $(y,\{\xjm\},\sigsq,\bm p,\bm\pi)$, one call to mixSER returns, for each
+variant $j$: the variant log-Bayes-factor $\log\BF_j$ \eqref{eq:bf-variant}; the
+posterior inclusion probability $\alpha_j$ \eqref{eq:pip}; the coding posterior
+$\{w_{jm}\}$ \eqref{eq:w}; the per-coding posterior moments
+$(\mu_{jm},s_{jm}^{2})$ \eqref{eq:postmoments}; and the posterior first/second
+moments \eqref{eq:moments} with their designs for residualisation. The SuSiE~2.0
+IBSS loop uses these exactly as it uses an ordinary SER: for each of the $L$
+single effects it forms the partial residual by subtracting the posterior-mean
+fits \eqref{eq:fitted} of the other effects, calls mixSER, and updates $\sigsq$
+from the expected residual sum of squares built from \eqref{eq:moments}. Credible
+sets and PIPs are assembled from the $\bm\alpha$ vectors as in SuSiE. When $M=1$
+the coding mixture is trivial, $w_{j1}\equiv1$ and
+$\BF_j=\BF_{j1}$, so mixSER \emph{is} the standard single-effect regression: it is
+a strict, drop-in generalisation.
+
+% ===========================================================================
+\section{Why this stays exact: no free energy}\label{sec:noelbo}
+
+The entire development above is exact because the marginal likelihood
+\eqref{eq:ml-ser} is a finite sum: the effect $\beta$ is integrated in closed
+form (a one-dimensional Gaussian integral, Appendix~\ref{app:gauss}) and the
+coding label $c$ contributes a single $M$-way sum per variant. Consequently
+Bayes factors, posteriors, and the EB updates are all available in closed form,
+and the method lives entirely within the Stephens empirical-Bayes tradition of
+\texttt{ash}, SuSiE, and fSuSiE, with no variational family and no evidence lower
+bound.
+
+\begin{remark}[Where a variational bound would have been forced]
+The exactness hinges on attaching the coding mixture to the \emph{variant}. If
+instead each individual $i$ carried its own coding label $z_i$, the marginal
+likelihood would be
+$\sum_{z_1,\dots,z_n}\prod_i \pi_{z_i}\int\prod_i\Nor(y_i;x_{ij}^{(z_i)}\beta_{z_i},\sigsq)\,
+ \prod_m\Nor(\beta_m;0,\sigz{m})\,d\bm\beta$,
+an $M^{n}$ sum that couples the assignments with the $M$ shared effects and is
+intractable. That per-individual model is the only one that requires a mean-field
+variational (free-energy) approximation. The variant-level coding mixture used
+here removes that obstacle while keeping the feature of interest --- allowing the
+locus to act through additive, dominant, or recessive coding --- and is the
+formulation aligned with fSuSiE.
+\end{remark}
+
+% ===========================================================================
+\appendix
+\section{The single-coding Gaussian integral}\label{app:gauss}
+
+For a centred design $x\in\R^{n}$, centred response $y$, residual variance
+$\sigsq$, and prior $\beta\sim\Nor(0,V)$, the marginal likelihood is the Gaussian
+\begin{equation}
+  \ML(V)=\int \Nor(y;x\beta,\sigsq I_n)\,\Nor(\beta;0,V)\,d\beta
+        =\Nor\!\big(y;\,0,\ \sigsq I_n+V\,xx^{\!\top}\big).
+\end{equation}
+By the matrix-determinant lemma and the Sherman--Morrison identity, with
+$\hat\beta=x^{\!\top}y/x^{\!\top}x$ and $\hat s^{2}=\sigsq/x^{\!\top}x$,
+\begin{align}
+  \det\!\big(\sigsq I_n+V xx^{\!\top}\big)
+     &=\sigma^{2n}\Big(1+\frac{V x^{\!\top}x}{\sigsq}\Big)
+      =\sigma^{2n}\,\frac{V+\hat s^{2}}{\hat s^{2}},\\
+  y^{\!\top}\big(\sigsq I_n+Vxx^{\!\top}\big)^{-1}y
+     &=\frac{y^{\!\top}y}{\sigsq}-\frac{V\,(x^{\!\top}y)^{2}}{\sigsq(\sigsq+Vx^{\!\top}x)}
+      =\frac{y^{\!\top}y}{\sigsq}-\hat\beta^{2}\Big(\frac1{\hat s^{2}}-\frac1{V+\hat s^{2}}\Big).
+\end{align}
+Substituting into $\log\big(\ML(V)/\ML_0\big)$ and cancelling the common
+$y^{\!\top}y/\sigsq$ term gives \eqref{eq:bf}. Completing the square in $\beta$ in
+the exponent of $\Nor(y;x\beta,\sigsq I_n)\Nor(\beta;0,V)$ gives the Gaussian
+posterior with precision $1/V+x^{\!\top}x/\sigsq$ and mean
+$s^{2}x^{\!\top}y/\sigsq$, i.e.\ \eqref{eq:postmoments}.
+
+\section*{References}
+\begin{enumerate}\itemsep1pt
+\item G.\ Wang, A.\ Sarkar, P.\ Carbonetto \& M.\ Stephens (2020). \textit{A simple
+  new approach to variable selection in regression, with application to genetic
+  fine mapping.} JRSS-B 82(5), 1273--1300.
+\item M.\ Stephens (2017). \textit{False discovery rates: a new deal.}
+  Biostatistics 18(2), 275--294. (\texttt{ash}; adaptive shrinkage.)
+\item B.\ Servin \& M.\ Stephens (2007). \textit{Imputation-based analysis of
+  association studies: candidate regions and quantitative traits.} PLoS Genetics
+  3(7), e114. (Single-SNP Bayes factor.)
+\item W.\ Denault et al. \textit{Fine-mapping molecular QTLs with functional
+  Sum of Single Effects (fSuSiE).} (SFR / scale-mixture prior; companion draft.)
+\end{enumerate}
+
+\end{document}

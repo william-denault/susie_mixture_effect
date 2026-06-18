@@ -6,7 +6,7 @@ n_sim =300
 n=100
 MAF=  .3
 sds=.25
-beta=  beta
+beta= 1
 generate_data= function (n,
                          mixture_prop= c(1/3,
                                          1/3,
@@ -26,21 +26,26 @@ generate_data= function (n,
             size=n,
             replace=TRUE)
   y=   rnorm(n,sd  = sds)
+  y_true=   0*y
 
   for ( i in 1:n){
 
     if( z[i]=="A"){
+      y_true[i]= rc$additive[i]*beta[1]
       y[i]=y[i]+rc$additive[i]*beta[1]
     }
     if( z[i]=="D"){
+      y_true[i]= rc$dominant[i]*beta[1]
       y[i]=y[i]+rc$dominant[i]*beta[2]
     }
     if( z[i]=="R"){
-      y[i]=y[i]+rc$dominant[i]*beta[3]
+      y_true[i]= dat$rc$recessive[i]*beta[3]
+      y[i]=y[i]+dat$rc$recessive[i]*beta[3]
     }
   }
 
   return(list(y=y,
+              y_true=y_true,
               z=z,
               rc= rc,
               beta=beta,
@@ -75,11 +80,22 @@ for ( o in 1: n_sim ){
       n_start = 10,
       pi_init = c(.9,.05,.05))
 
+    susie_res= susie_res <- susieR::susie(
+      X = matrix(as.double(dat$rc$additive), ncol = 1),
+      y = dat$y
+    )
+
+
 
 
     res[[m]]=list(fit=fit,
-                  dat=dat
+                  dat=dat,
+                  rmse_sample= rmse(dat$y, dat$ y_true),
+                  rmse_mix=rmse(fit$fitted, dat$y),
+                  rmse_susie= rmse(susie_res$fitted, dat$y)
     )
+
+
     m=m+1
     print(m)
 }

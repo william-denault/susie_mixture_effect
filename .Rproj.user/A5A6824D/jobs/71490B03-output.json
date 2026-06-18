@@ -1,0 +1,1 @@
+[2,"Error in beta == 1 : \r\n  comparison (==) is possible only for atomic and list types\r\nCalls: .rs.sourceWithProgress -> eval -> eval -> generate_data\r\nIn addition: Warning message:\r\npackage 'gtools' was built under R version 4.5.3 \r\nExecution halted\r\n"]
