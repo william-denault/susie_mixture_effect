@@ -39,8 +39,8 @@ generate_data= function (n,
       y[i]=y[i]+rc$dominant[i]*beta[2]
     }
     if( z[i]=="R"){
-      y_true[i]= dat$rc$recessive[i]*beta[3]
-      y[i]=y[i]+dat$rc$recessive[i]*beta[3]
+      y_true[i]=  rc$recessive[i]*beta[3]
+      y[i]=y[i]+ rc$recessive[i]*beta[3]
     }
   }
 
@@ -58,6 +58,7 @@ generate_data= function (n,
 ## A genuine per-individual mixture at ONE SNP: a fraction pi_R of individuals
 ## respond recessively, the rest additively.
 res=list()
+rmse= function(x,y){ sqrt(mean((x-y)^2))}
 
 m=1
 
