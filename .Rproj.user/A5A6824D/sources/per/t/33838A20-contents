@@ -31,7 +31,7 @@ rmse_res=  do.call(rbind,
                    )
                    ))
 
-ggplot(rmse_res, aes(y =rmse, x=type))+geom_boxplot()
+ggplot(rmse_res, aes(y =rmse, x=type,))+geom_boxplot()
 ggplot(rmse_res, aes(y =rmse,x = reg_type,
                      color = type,
                      shape=type))+geom_point()+
@@ -46,11 +46,11 @@ true_ind_mat[which(true_ind=="R"),3]=1
 
 
 
-plot(c(pi_est[,1]),c(true_pi[,1]) )
+plot(c(pi_est[,1]),c(true_pi[,1]), xlab="proportion ind additive regulatio" )
 
 plot(c(pi_est[,2]),c(true_pi[,2]) )
 
-plot(c(pi_est[,3]),c(true_pi[,3]) )
+plot(c(pi_est[,3]),c(true_pi[,3]) , main="Estiat")
 
 
 
@@ -73,3 +73,4 @@ roc_curve <- roc( (true_ind_mat[,3]),  (ind_est[,3]) )
 plot(roc_curve, main="classification of individual being under recessive regulation")
 roc_curve <- roc( (true_ind_mat[,2]),  (ind_est[,2]) )
 plot(roc_curve, main="classification of individual being under dominant regulation")
+

@@ -1,1 +1,0 @@
-[2,"Error in generate_data(n = n, mixture_prop = mix_pi, beta = beta, sds = sds,  : \r\n  object 'dat' not found\r\nCalls: .rs.sourceWithProgress -> eval -> eval -> generate_data\r\nIn addition: Warning message:\r\npackage 'gtools' was built under R version 4.5.3 \r\nExecution halted\r\n"]

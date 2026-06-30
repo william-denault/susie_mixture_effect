@@ -3,7 +3,7 @@
     "path": "C:/Document/Serieux/Travail/Data_analysis_and_papers/susie_mixture_effect/script/plot_script/plot_single_effect_model.R",
     "project_path": "script/plot_script/plot_single_effect_model.R",
     "type": "r_source",
-    "hash": "0",
+    "hash": "1184630092",
     "contents": "",
     "dirty": false,
     "created": 1781782061099.0,
@@ -12,15 +12,15 @@
     "properties": {
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "43,46",
-        "scrollLine": "28"
+        "cursorPosition": "83,0",
+        "scrollLine": "0"
     },
     "folds": "",
-    "lastKnownWriteTime": 1781782915,
+    "lastKnownWriteTime": 1781813047,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1781782915392,
+    "last_content_update": 1781813047655,
     "read_only": false,
     "read_only_alternatives": []
 }

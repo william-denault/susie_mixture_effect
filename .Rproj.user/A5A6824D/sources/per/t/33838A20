@@ -3,7 +3,7 @@
     "path": "C:/Document/Serieux/Travail/Data_analysis_and_papers/susie_mixture_effect/script/plot_script/plot_mixture_effect_model.R",
     "project_path": "script/plot_script/plot_mixture_effect_model.R",
     "type": "r_source",
-    "hash": "0",
+    "hash": "2756758735",
     "contents": "",
     "dirty": false,
     "created": 1781781792100.0,
@@ -12,15 +12,15 @@
     "properties": {
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "36,47",
-        "scrollLine": "21"
+        "cursorPosition": "46,0",
+        "scrollLine": "0"
     },
     "folds": "",
-    "lastKnownWriteTime": 1781783203,
+    "lastKnownWriteTime": 1781817607,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1781783203092,
+    "last_content_update": 1781817607399,
     "read_only": false,
     "read_only_alternatives": []
 }

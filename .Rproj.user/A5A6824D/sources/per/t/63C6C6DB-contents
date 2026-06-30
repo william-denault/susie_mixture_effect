@@ -1,5 +1,5 @@
 load("C:/Document/Serieux/Travail/Data_analysis_and_papers/susie_mixture_effect/sim/single_model_effect.RData")
-
+library(ggplot2)
 
 
 pi_est= do.call(rbind,
